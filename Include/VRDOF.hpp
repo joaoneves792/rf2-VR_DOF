@@ -1,5 +1,5 @@
 /*
-rF2 Semaphore DX11
+rF2 VRDOF
 */
 
 #ifndef _INTERNALS_EXAMPLE_H
@@ -9,15 +9,15 @@ rF2 Semaphore DX11
 #include <d3d11.h>
 #include <dxgi1_2.h>
 
-#define PLUGIN_NAME             "rF2 SemaphoreDX11 - 2019.01.20"
+#define PLUGIN_NAME             "rF2 VRDOF - 2019.03.07"
 #define DELTA_BEST_VERSION      "v1"
 #define LINUX 
-#undef LINUX
+//#undef LINUX
 
 #if _WIN64
-  #define LOG_FILE              "Bin64\\Plugins\\SemaphoreDX11.log"
+  #define LOG_FILE              "Bin64\\Plugins\\VRDOF.log"
 #else
-  #define LOG_FILE              "Bin32\\Plugins\\SemaphoreDX11.log"
+  #define LOG_FILE              "Bin32\\Plugins\\VRDOF.log"
 
 #endif
 
@@ -55,14 +55,14 @@ struct cbLights{
 	float count;
 };
 
-class SemaphoreDX11Plugin : public InternalsPluginV06
+class VRDOFPlugin : public InternalsPluginV06
 {
 
 public:
 
     // Constructor/destructor
-    SemaphoreDX11Plugin() {}
-    ~SemaphoreDX11Plugin();
+    VRDOFPlugin() {}
+    ~VRDOFPlugin();
 
 
     void EnterRealtime();
@@ -84,9 +84,10 @@ private:
     IDXGISwapChain* getDX11SwapChain();
     void CreateSearchSwapChain(ID3D11Device* device, IDXGISwapChain** tempSwapChain, HWND hwnd);
     void CreateSearchDevice(ID3D11Device** pDevice, ID3D11DeviceContext** pContext);
+	void CreateSearchTexture(ID3D11Device* pDevice, ID3D11Texture2D** ppTexture);
     void CreateInvisibleWindow(HWND* hwnd);
-    void* findSwapChainInstance(void* pvReplica, DWORD dwVTable);
-    void* placeDetour(BYTE* src, BYTE* dest);
+    void* findInstance(void* pvReplica, DWORD dwVTable, bool (*test)(DWORD* current));
+    void* placeDetour(BYTE* src, BYTE* dest, int index);
 
     void InitPipeline();
 };

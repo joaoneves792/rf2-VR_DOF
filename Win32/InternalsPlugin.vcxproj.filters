@@ -30,15 +30,15 @@
     <ClInclude Include="..\Include\export.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\Include\semaphore_shader.h">
+    <ClInclude Include="..\include\VRDOF.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\include\SemaphoreDX11.hpp">
+    <ClInclude Include="..\Include\shaders.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\source\SemaphoreDX11.cpp">
+    <ClCompile Include="..\source\VRDOF.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -101,7 +101,7 @@
     <LibraryPath>$(VC_LibraryPath_x86);$(WindowsSDK_LibraryPath_x86);E:\dev\dxsdk\Lib\x86;C:\Program Files (x86)\Microsoft SDKs\Windows\V7.0A\Lib;E:\dev\msvc2012\vc\lib;</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <TargetName>SemaphoreDX11</TargetName>
+    <TargetName>VRDOF</TargetName>
     <ExecutablePath>$(VCInstallDir)bin\x86_amd64;$(VCInstallDir)bin;$(WindowsSdkDir)bin\NETFX 4.0 Tools;$(WindowsSdkDir)bin;$(VSInstallDir)Common7\Tools\bin;$(VSInstallDir)Common7\tools;$(VSInstallDir)Common7\ide;$(ProgramFiles)\HTML Help Workshop;$(FrameworkSDKDir)\bin;$(MSBuildToolsPath32);$(VSInstallDir);$(SystemRoot)\SysWow64;$(FxCopDir);$(PATH);$(WindowsSDK_BinPath);</ExecutablePath>
     <LibraryPath>$(ProjectDir)/../lib;$(LibraryPath)</LibraryPath>
     <CodeAnalysisRuleSet>NativeMinimumRules.ruleset</CodeAnalysisRuleSet>
@@ -292,7 +292,7 @@
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\source\SemaphoreDX11.cpp">
+    <ClCompile Include="..\source\VRDOF.cpp">
       <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -306,11 +306,11 @@
   <ItemGroup>
     <ClInclude Include="..\Include\basic_types.h" />
     <ClInclude Include="..\Include\BeaEngine.h" />
-    <ClInclude Include="..\include\SemaphoreDX11.hpp" />
+    <ClInclude Include="..\include\VRDOF.hpp" />
     <ClInclude Include="..\Include\export.h" />
     <ClInclude Include="..\Include\InternalsPlugin.hpp" />
     <ClInclude Include="..\Include\PluginObjects.hpp" />
-    <ClInclude Include="..\Include\semaphore_shader.h" />
+    <ClInclude Include="..\Include\shaders.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -1,10 +1,10 @@
 /*
-rF2 Semaphore DX11
+rF2 VR DOF
 */
 
 
-#include "SemaphoreDX11.hpp"
-#include "semaphore_shader.h"
+#include "VRDOF.hpp"
+#include "shaders.h"
 #include <d3d11.h>
 //#include <d3dcompiler.h>
 #include <dxgi.h>
@@ -38,13 +38,13 @@ extern "C" __declspec(dllexport)
     int __cdecl GetPluginVersion()                         { return 6; }
 
 extern "C" __declspec(dllexport)
-    PluginObject * __cdecl CreatePluginObject()            { return((PluginObject *) new SemaphoreDX11Plugin); }
+    PluginObject * __cdecl CreatePluginObject()            { return((PluginObject *) new VRDOFPlugin); }
 
 extern "C" __declspec(dllexport)
-    void __cdecl DestroyPluginObject(PluginObject *obj)    { delete((SemaphoreDX11Plugin *)obj); }
+    void __cdecl DestroyPluginObject(PluginObject *obj)    { delete((VRDOFPlugin *)obj); }
 
 
-namespace semaphoreDX11{
+namespace VRDOF{
     FILE* out_file = NULL;
 
     bool g_realtime = false;
@@ -60,14 +60,22 @@ namespace semaphoreDX11{
     IDXGISwapChain* g_swapchain = NULL;
     ID3D11DeviceContext* g_context = NULL;
     
+	ID3D11Texture2D* g_depthTexture = NULL;
+
     typedef HRESULT(__stdcall *D3D11PresentHook) (IDXGISwapChain* This, UINT SyncInterval, UINT Flags);
+    typedef HRESULT(__stdcall *D3D11CreateTextureHook) (const D3D11_TEXTURE2D_DESC *pDesc, const D3D11_SUBRESOURCE_DATA *pInitialData, ID3D11Texture2D **ppTexture2D);
+
     D3D11PresentHook g_oldPresent;
-    struct HookContext{
+    D3D11CreateTextureHook g_oldCreateTexture; //TODO dont hook this, its useless, refactor to hook VRsubmit
+	
+	struct HookContext{
         BYTE original_code[64];
         SIZE_T dst_ptr;
         BYTE near_jmp[5];
     };
-    HookContext* presenthook64;
+    HookContext* hook[2];
+
+
 
     pD3DCompile pShaderCompiler = NULL;
     ID3D11VertexShader *g_pVS = NULL;
@@ -77,10 +85,13 @@ namespace semaphoreDX11{
     ID3D11Buffer *g_pViewportCBuffer;
 	ID3D11Buffer *g_pLightColorCBuffer;
 	ID3D11RasterizerState* g_rs;
+	ID3D11SamplerState* g_d3dSamplerState;
+	ID3D11ShaderResourceView* g_DepthShaderResourceView;
+
 
 }
 
-using namespace semaphoreDX11;
+using namespace VRDOF;
 
 void draw(){
 	static unsigned char active = 4;
@@ -127,6 +138,8 @@ void draw(){
     g_context->VSSetConstantBuffers( 0, 1, &g_pViewportCBuffer);
 	g_context->PSSetConstantBuffers( 1, 1, &g_pLightColorCBuffer);
     g_context->VSSetConstantBuffers( 1, 1, &g_pLightColorCBuffer);
+	g_context->PSSetSamplers(0, 1, &g_d3dSamplerState);
+	g_context->PSSetShaderResources(0, 1, &g_DepthShaderResourceView);
     UINT stride = sizeof(float)*3;
     UINT offset = 0;
     g_context->IASetVertexBuffers(0, 1, &g_pVBuffer, &stride, &offset);
@@ -135,6 +148,8 @@ void draw(){
     g_context->Draw(6, 0);
 	
 }
+
+
 
 HRESULT __stdcall hookedPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags){
 	if(g_realtime && pShaderCompiler && g_pVS && (g_inPits || g_redlights)){
@@ -154,12 +169,16 @@ HRESULT __stdcall hookedPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Fl
 		ID3D11Buffer* oldPSConstantBuffer1;
 		ID3D11Buffer* oldVSConstantBuffer1;
 		ID3D11RasterizerState* rs;
+		ID3D11SamplerState* ss;
+		ID3D11ShaderResourceView* srv;
 
 		//What the hell is all this crap, you may ask?
 		//Well rf2 seems to use gets to retrieve resources that were used when drawing the last frame
 		//And then attemps to use them, if we dont revert all state back to how we found it, then there will be graphical glitches
 		//Evidence of this? I found a pointer to g_PS in a trace of d3d11 calls outside of our hooked Present
 		g_context->RSGetState(&rs);
+		g_context->PSGetSamplers(0, 1, &ss);
+		g_context->PSGetShaderResources(0, 1, &srv);
 		g_context->PSGetShader(&oldPS, PSclassInstances, &psCICount);
 		g_context->VSGetShader(&oldVS, VSclassInstances, &vsCICount);
 		g_context->IAGetInputLayout(&oldLayout);
@@ -173,6 +192,8 @@ HRESULT __stdcall hookedPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Fl
 		draw();//Actually do our stuff...
 
 		g_context->RSSetState(rs);
+		g_context->PSSetSamplers(0, 1, &ss);
+		g_context->PSGetShaderResources(0, 1, &srv);
 		g_context->PSSetShader(oldPS, PSclassInstances, psCICount);
 		g_context->VSSetShader(oldVS, VSclassInstances, vsCICount);
 		g_context->IASetInputLayout(oldLayout);
@@ -186,15 +207,22 @@ HRESULT __stdcall hookedPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Fl
     return g_oldPresent(This, SyncInterval, Flags);
 }
 
+HRESULT __stdcall hookedCreateTexture(const D3D11_TEXTURE2D_DESC *pDesc, const D3D11_SUBRESOURCE_DATA *pInitialData, ID3D11Texture2D **ppTexture2D){
+	fprintf(out_file, "CreateTexture2D: %d x %d, %d\n", pDesc->Width, pDesc->Height, pDesc->Format);
+	fflush(out_file);
+	return g_oldCreateTexture(pDesc, pInitialData, ppTexture2D);
+}
 
-SemaphoreDX11Plugin::~SemaphoreDX11Plugin(){
+
+
+VRDOFPlugin::~VRDOFPlugin(){
     SAFE_RELEASE(g_pLayout)
     SAFE_RELEASE(g_pVS)
     SAFE_RELEASE(g_pPS)
     SAFE_RELEASE(g_pVBuffer)
 }
 
-void SemaphoreDX11Plugin::WriteLog(const char * const msg)
+void VRDOFPlugin::WriteLog(const char * const msg)
 {
     if (out_file == NULL)
         out_file = fopen(LOG_FILE, "w");
@@ -206,7 +234,7 @@ void SemaphoreDX11Plugin::WriteLog(const char * const msg)
 }
 
 
-void SemaphoreDX11Plugin::Load()
+void VRDOFPlugin::Load()
 {
     WriteLog("--LOAD--");
     //D3DCompiler is a hot mess, basically there can be different versions of the dll depending on the windows version
@@ -243,6 +271,16 @@ void SemaphoreDX11Plugin::Load()
                 g_d3dDevice->GetImmediateContext(&g_context);
                 if(g_context){
                     WriteLog("Found Context");
+					/*if(!g_oldCreateTexture){
+						DWORD_PTR* pDeviceVtable = (DWORD_PTR*)g_d3dDevice;
+						pDeviceVtable = (DWORD_PTR*)pDeviceVtable[0];
+						g_oldCreateTexture = (D3D11CreateTextureHook)placeDetour((BYTE*)pDeviceVtable[16], (BYTE*)hookedCreateTexture, 1);
+						if(g_oldCreateTexture){
+							WriteLog("CreateTexture2D Hook successfull");
+						}else{
+							WriteLog("Unable to hook CreateTexture2D");
+						}
+					}*/
                     InitPipeline();
                 }
             }
@@ -251,9 +289,25 @@ void SemaphoreDX11Plugin::Load()
     }
 }
 
+bool testTexture(DWORD* current){
+	__try{
+		DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+		ID3D11Texture2D* t = (ID3D11Texture2D*)current;
+		D3D11_TEXTURE2D_DESC desc;
+		t->GetDesc(&desc);
+		format = desc.Format;
+		fprintf(out_file, "Found Texture: %d x %d, %d\n", desc.Width, desc.Height, desc.Format);
+		fflush(out_file);
+		if(format == DXGI_FORMAT_R24G8_TYPELESS){
+			return true;
+		}
+	}__except(1){
+		return false;
+	}
+	return false;
+}
 
-
-void SemaphoreDX11Plugin::EnterRealtime()
+void VRDOFPlugin::EnterRealtime()
 {
     g_realtime = true;
     WriteLog("---ENTERREALTIME---");
@@ -262,7 +316,7 @@ void SemaphoreDX11Plugin::EnterRealtime()
         //Only hook present when entering realtime to prevent things like the steam overlay from overriding our hook
         DWORD_PTR* pSwapChainVtable = (DWORD_PTR*)g_swapchain;
         pSwapChainVtable = (DWORD_PTR*)pSwapChainVtable[0];
-        g_oldPresent = (D3D11PresentHook)placeDetour((BYTE*)pSwapChainVtable[8], (BYTE*)hookedPresent);
+        g_oldPresent = (D3D11PresentHook)placeDetour((BYTE*)pSwapChainVtable[8], (BYTE*)hookedPresent, 0);
         if(g_oldPresent){
             WriteLog("Present Hook successfull");
         }else{
@@ -270,20 +324,36 @@ void SemaphoreDX11Plugin::EnterRealtime()
         }
     }
 
+	ID3D11Texture2D *pSearchTexture;
+	CreateSearchTexture(g_d3dDevice, &pSearchTexture);
+	DWORD pVtable = *(DWORD*)pSearchTexture;
+	g_depthTexture = (ID3D11Texture2D*) findInstance(pSearchTexture, pVtable, testTexture);
+	if(g_depthTexture){
+		WriteLog("Found depth buffer texture");
+
+		D3D11_SHADER_RESOURCE_VIEW_DESC sr_desc;
+		sr_desc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+		sr_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		sr_desc.Texture2D.MostDetailedMip = 0;
+		sr_desc.Texture2D.MipLevels = -1;
+		g_d3dDevice->CreateShaderResourceView(g_depthTexture, &sr_desc, &g_DepthShaderResourceView);
+	}else
+		WriteLog("No depth buffer texture found!");
+
     if(!g_d3dDevice || !g_swapchain || !g_context)
         WriteLog("Failed to find dx11 resources");
 	
 	
 }
 
-void SemaphoreDX11Plugin::ExitRealtime()
+void VRDOFPlugin::ExitRealtime()
 {
     g_realtime = false;
     //g_messageDisplayed = false;
     WriteLog("---EXITREALTIME---");
 }
 
-void SemaphoreDX11Plugin::UpdateScoring( const ScoringInfoV01 &info ){
+void VRDOFPlugin::UpdateScoring( const ScoringInfoV01 &info ){
 	long numVehicles = info.mNumVehicles;
     long i;
 	for(i = 0; i < numVehicles; i++){
@@ -307,14 +377,14 @@ void SemaphoreDX11Plugin::UpdateScoring( const ScoringInfoV01 &info ){
 
 }
 
-bool SemaphoreDX11Plugin::WantsToDisplayMessage( MessageInfoV01 &msgInfo )
+bool VRDOFPlugin::WantsToDisplayMessage( MessageInfoV01 &msgInfo )
 {
 	if(g_realtime && !g_messageDisplayed){
         
-        if(g_d3dDevice && g_swapchain && g_oldPresent && g_pPS)
-            sprintf(msgInfo.mText, "Semaphore DX11 OK");
+        if(g_d3dDevice && g_swapchain && g_oldPresent && g_pPS && g_oldCreateTexture)
+            sprintf(msgInfo.mText, "VRDOF OK");
         else
-            sprintf(msgInfo.mText, "Semaphore DX11 FAILURE");
+            sprintf(msgInfo.mText, "VRDOF FAILURE");
 
         g_messageDisplayed = true;
         return true;
@@ -322,7 +392,7 @@ bool SemaphoreDX11Plugin::WantsToDisplayMessage( MessageInfoV01 &msgInfo )
     return false;
 }
 
-const DWORD SemaphoreDX11Plugin::DisasmRecalculateOffset(const SIZE_T srcaddress, const SIZE_T detourAddress){
+const DWORD VRDOFPlugin::DisasmRecalculateOffset(const SIZE_T srcaddress, const SIZE_T detourAddress){
     DISASM disasm;
     memset(&disasm, 0, sizeof(DISASM));
     disasm.EIP = (UIntPtr)srcaddress;
@@ -343,7 +413,7 @@ const DWORD SemaphoreDX11Plugin::DisasmRecalculateOffset(const SIZE_T srcaddress
 
 }
  
-const unsigned int SemaphoreDX11Plugin::DisasmLengthCheck(const SIZE_T address, const unsigned int jumplength){
+const unsigned int VRDOFPlugin::DisasmLengthCheck(const SIZE_T address, const unsigned int jumplength){
         DISASM disasm;
         memset(&disasm, 0, sizeof(DISASM));
  
@@ -377,7 +447,7 @@ const unsigned int SemaphoreDX11Plugin::DisasmLengthCheck(const SIZE_T address, 
         return processed;
 }
 
-void SemaphoreDX11Plugin::hexDump (char *desc, void *addr, int len) {
+void VRDOFPlugin::hexDump (char *desc, void *addr, int len) {
     int i;
     unsigned char buff[17];
     unsigned char *pc = (unsigned char*)addr;
@@ -431,7 +501,7 @@ void SemaphoreDX11Plugin::hexDump (char *desc, void *addr, int len) {
 }
 
 //based on: https://www.unknowncheats.me/forum/d3d-tutorials-and-source/88369-universal-d3d11-hook.html by evolution536
-void* SemaphoreDX11Plugin::placeDetour(BYTE* src, BYTE* dest){
+void* VRDOFPlugin::placeDetour(BYTE* src, BYTE* dest, int index){
 #define _PTR_MAX_VALUE 0x7FFFFFFEFFFF
 //#define JMPLEN 6
 #define JMPLEN 5
@@ -448,14 +518,14 @@ void* SemaphoreDX11Plugin::placeDetour(BYTE* src, BYTE* dest){
                 break;
 #endif
         if(mbi.State == MEM_FREE){
-            if (presenthook64 = (HookContext*)VirtualAlloc((LPVOID)mbi.BaseAddress, 0x1000, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE)){
+            if (hook[index] = (HookContext*)VirtualAlloc((LPVOID)mbi.BaseAddress, 0x1000, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE)){
                     break;
             }
         }
     }
  
     // If allocating a memory page failed, the function failed.
-    if (!presenthook64)
+    if (!hook[index])
         return NULL;
 
     // Save original code and apply detour. The detour code is:
@@ -473,36 +543,46 @@ void* SemaphoreDX11Plugin::placeDetour(BYTE* src, BYTE* dest){
         WriteLog("Bad news, someone hooked this function already!");
         //So we double hook it!!
         //just place a jump to the guys who already hooked it before (Assuming near jump hook, which is not good on x64...)
-        DWORD newOffset = DisasmRecalculateOffset((SIZE_T)src, (SIZE_T)presenthook64->original_code);
-        presenthook64->original_code[0] = 0xE9;
-        memcpy(&presenthook64->original_code[1], &newOffset, sizeof(DWORD));
+        DWORD newOffset = DisasmRecalculateOffset((SIZE_T)src, (SIZE_T)hook[index]->original_code);
+        hook[index]->original_code[0] = 0xE9;
+        memcpy(&(hook[index])->original_code[1], &newOffset, sizeof(DWORD));
     }else{
-        memcpy(presenthook64->original_code, src, length);
-        memcpy(&presenthook64->original_code[length], detour, sizeof(detour));
-        *(SIZE_T*)&presenthook64->original_code[length + 3] = (SIZE_T)src + length;
+        memcpy(hook[index]->original_code, src, length);
+        memcpy(&(hook[index])->original_code[length], detour, sizeof(detour));
+        *(SIZE_T*)&(hook[index])->original_code[length + 3] = (SIZE_T)src + length;
     }
 
     // Build a far jump to the destination function.
     //*(WORD*)&presenthook64->far_jmp = 0x25FF;
     //*(DWORD*)(presenthook64->far_jmp + 2) = (DWORD)((SIZE_T)presenthook64 - (SIZE_T)src + FIELD_OFFSET(HookContext, dst_ptr) - 6);
     //presenthook64->dst_ptr = (SIZE_T)dest;
-    *(WORD*)&presenthook64->near_jmp = 0xE9;    
-    *(DWORD*)(presenthook64->near_jmp + 1) = (DWORD)((SIZE_T)dest - (SIZE_T)src - JMPLEN);
+    *(WORD*)&(hook[index])->near_jmp = 0xE9;    
+    *(DWORD*)(hook[index]->near_jmp + 1) = (DWORD)((SIZE_T)dest - (SIZE_T)src - JMPLEN);
 
      
     // Write the far/near jump code to the src function.
     DWORD flOld = 0;
     VirtualProtect(src, JMPLEN, PAGE_EXECUTE_READWRITE, &flOld);
-    memcpy(src, presenthook64->near_jmp, JMPLEN);
+    memcpy(src, hook[index]->near_jmp, JMPLEN);
     VirtualProtect(src, JMPLEN, flOld, &flOld);
     
     // Return a pointer to the code that will jump (using detour) to the src function
-    return presenthook64->original_code;
+    return hook[index]->original_code;
 }
 
+bool testSwapChain(DWORD* current){
+	__try{
+		IDXGISwapChain* sc = (IDXGISwapChain*)current;
+        ID3D11Device* dev = NULL;
+        sc->GetDevice(__uuidof(ID3D11Device), (void**)&dev);
+    }__except(1){
+		return false;
+	}
+	return true;
+}
 
 //based on https://www.unknowncheats.me/forum/d3d-tutorials-source/121840-hook-directx-11-dynamically.html by smallC
-void* SemaphoreDX11Plugin::findSwapChainInstance(void* pvReplica, DWORD dwVTable){
+void* VRDOFPlugin::findInstance(void* pvReplica, DWORD dwVTable, bool (*test)(DWORD* current)){
 #ifdef _AMD64_
 #define _PTR_MAX_VALUE 0x7FFFFFFEFFFF
 MEMORY_BASIC_INFORMATION64 mbi = { 0 };
@@ -534,12 +614,8 @@ MEMORY_BASIC_INFORMATION32 mbi = { 0 };
             if (dwVTableAddress == dwVTable)
             {
                 if (current == (DWORD*)pvReplica){ WriteLog("Found fake"); continue; }
-                __try{
-                    IDXGISwapChain* sc = (IDXGISwapChain*)current;
-                    ID3D11Device* dev = NULL;
-                    sc->GetDevice(__uuidof(ID3D11Device), (void**)&dev);
-                }__except(1){
-                    WriteLog("Found a bad pointer");
+                if(!test(current)){
+                    WriteLog("Found a bad instance");
                     continue;
                 }
                 return ((void*)current);    
@@ -550,7 +626,25 @@ MEMORY_BASIC_INFORMATION32 mbi = { 0 };
 
 }
 
-void SemaphoreDX11Plugin::CreateInvisibleWindow(HWND* hwnd){
+void VRDOFPlugin::CreateSearchTexture(ID3D11Device* pDevice, ID3D11Texture2D** pTexture){
+	D3D11_TEXTURE2D_DESC depthStencilDesc;
+	depthStencilDesc.Width = 1920;
+	depthStencilDesc.Height = 1080;
+	depthStencilDesc.MipLevels = 1;
+	depthStencilDesc.ArraySize = 1;
+	depthStencilDesc.Format = DXGI_FORMAT_R24G8_TYPELESS;
+	depthStencilDesc.SampleDesc.Count = 1;
+	depthStencilDesc.SampleDesc.Quality = 0;
+	depthStencilDesc.Usage = D3D11_USAGE_DEFAULT;
+	depthStencilDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+	depthStencilDesc.CPUAccessFlags = 0;
+	depthStencilDesc.MiscFlags = 0;
+
+	pDevice->CreateTexture2D(&depthStencilDesc, 0, pTexture);
+}
+
+
+void VRDOFPlugin::CreateInvisibleWindow(HWND* hwnd){
     WNDCLASSEXW wc;
     ZeroMemory(&wc, sizeof(WNDCLASSEX));
     wc.cbSize = sizeof(WNDCLASSEX);
@@ -573,7 +667,7 @@ void SemaphoreDX11Plugin::CreateInvisibleWindow(HWND* hwnd){
                              nullptr);
 }
 
-void SemaphoreDX11Plugin::CreateSearchDevice(ID3D11Device** pDevice, ID3D11DeviceContext** pContext){
+void VRDOFPlugin::CreateSearchDevice(ID3D11Device** pDevice, ID3D11DeviceContext** pContext){
     HRESULT hr;
 
     ID3D11DeviceContext* pd3dDeviceContext = NULL;
@@ -596,7 +690,7 @@ void SemaphoreDX11Plugin::CreateSearchDevice(ID3D11Device** pDevice, ID3D11Devic
     
 }
 
-void SemaphoreDX11Plugin::CreateSearchSwapChain(ID3D11Device* device, IDXGISwapChain** tempSwapChain, HWND hwnd){
+void VRDOFPlugin::CreateSearchSwapChain(ID3D11Device* device, IDXGISwapChain** tempSwapChain, HWND hwnd){
     HRESULT hr;
 
     IDXGIFactory1 * pIDXGIFactory1 = NULL;
@@ -632,7 +726,7 @@ void SemaphoreDX11Plugin::CreateSearchSwapChain(ID3D11Device* device, IDXGISwapC
     SAFE_RELEASE(pIDXGIFactory1)
 }
  
-IDXGISwapChain* SemaphoreDX11Plugin::getDX11SwapChain(){
+IDXGISwapChain* VRDOFPlugin::getDX11SwapChain(){
     IDXGISwapChain* pSearchSwapChain = NULL;    
     ID3D11Device* pDevice = NULL;
     ID3D11DeviceContext* pContext = NULL;
@@ -660,7 +754,7 @@ IDXGISwapChain* SemaphoreDX11Plugin::getDX11SwapChain(){
     }
     IDXGISwapChain* pSwapChain = NULL;
     DWORD pVtable = *(DWORD*)pSearchSwapChain;
-    pSwapChain = (IDXGISwapChain*) findSwapChainInstance( pSearchSwapChain, pVtable );
+    pSwapChain = (IDXGISwapChain*) findInstance(pSearchSwapChain, pVtable, testSwapChain);
     if(pSwapChain)
         WriteLog("Found Swapchain");
     else
@@ -674,7 +768,7 @@ IDXGISwapChain* SemaphoreDX11Plugin::getDX11SwapChain(){
  }
 
 
-void SemaphoreDX11Plugin::InitPipeline(){
+void VRDOFPlugin::InitPipeline(){
     ID3D10Blob *VS, *PS;
     ID3D10Blob *pErrors;
     std::string shader = std::string(semaphore_shader);
@@ -768,4 +862,28 @@ void SemaphoreDX11Plugin::InitPipeline(){
 	rsDesc.FillMode = D3D11_FILL_SOLID;
 
 	g_d3dDevice->CreateRasterizerState(&rsDesc, &g_rs);
+
+
+	WriteLog("Setting up Sampler");
+	D3D11_SAMPLER_DESC samplerDesc;
+	ZeroMemory( &samplerDesc, sizeof(D3D11_SAMPLER_DESC) );
+ 
+	samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+	samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
+	samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
+	samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+	samplerDesc.MipLODBias = 0.0f;
+	samplerDesc.MaxAnisotropy = 1;
+	samplerDesc.ComparisonFunc = D3D11_COMPARISON_NEVER;
+	samplerDesc.BorderColor[0] = 1.0f;
+	samplerDesc.BorderColor[1] = 1.0f;
+	samplerDesc.BorderColor[2] = 1.0f;
+	samplerDesc.BorderColor[3] = 1.0f;
+	samplerDesc.MinLOD = -FLT_MAX;
+	samplerDesc.MaxLOD = FLT_MAX;
+ 
+	HRESULT hr = g_d3dDevice->CreateSamplerState( &samplerDesc, &g_d3dSamplerState );
+	if ( FAILED( hr ) ){
+		WriteLog("Failed to create sampler state");
+	}
 }
