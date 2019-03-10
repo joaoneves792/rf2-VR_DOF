@@ -23,7 +23,7 @@ const char * const semaphore_shader =
 "    return output;\n"
 "}\n"
 "float4 PShader(float2 NDCpos : POSITION) : SV_TARGET{\n"
-"	  float depth = Texture.Sample( Sampler, (NDCpos*0.5)+0.5).r;\n"
-"     return float4(depth, 0.0, 0.0, 0.5);\n"
+"	  float depth = Texture.Sample( Sampler, float2((NDCpos.x*0.5)+0.5, (NDCpos.y*-0.5)+0.5)).r;\n"
+"     return float4(depth, depth, depth, 1.0);\n"
 "}";
 #endif //__SEMAPHORE_SHADER__

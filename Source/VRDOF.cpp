@@ -87,6 +87,7 @@ namespace VRDOF{
 	ID3D11RasterizerState* g_rs;
 	ID3D11SamplerState* g_d3dSamplerState;
 	ID3D11ShaderResourceView* g_DepthShaderResourceView;
+	ID3D11DepthStencilState* g_DepthStencilState; //to disable depth writes
 
 
 }
@@ -140,6 +141,7 @@ void draw(){
     g_context->VSSetConstantBuffers( 1, 1, &g_pLightColorCBuffer);
 	g_context->PSSetSamplers(0, 1, &g_d3dSamplerState);
 	g_context->PSSetShaderResources(0, 1, &g_DepthShaderResourceView);
+	g_context->OMSetDepthStencilState(g_DepthStencilState, 0);
     UINT stride = sizeof(float)*3;
     UINT offset = 0;
     g_context->IASetVertexBuffers(0, 1, &g_pVBuffer, &stride, &offset);
@@ -171,6 +173,9 @@ HRESULT __stdcall hookedPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Fl
 		ID3D11RasterizerState* rs;
 		ID3D11SamplerState* ss;
 		ID3D11ShaderResourceView* srv;
+		ID3D11DepthStencilState* dss;
+		UINT stencilRef;
+
 
 		//What the hell is all this crap, you may ask?
 		//Well rf2 seems to use gets to retrieve resources that were used when drawing the last frame
@@ -179,6 +184,7 @@ HRESULT __stdcall hookedPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Fl
 		g_context->RSGetState(&rs);
 		g_context->PSGetSamplers(0, 1, &ss);
 		g_context->PSGetShaderResources(0, 1, &srv);
+		g_context->OMGetDepthStencilState(&dss, &stencilRef);
 		g_context->PSGetShader(&oldPS, PSclassInstances, &psCICount);
 		g_context->VSGetShader(&oldVS, VSclassInstances, &vsCICount);
 		g_context->IAGetInputLayout(&oldLayout);
@@ -194,6 +200,7 @@ HRESULT __stdcall hookedPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Fl
 		g_context->RSSetState(rs);
 		g_context->PSSetSamplers(0, 1, &ss);
 		g_context->PSGetShaderResources(0, 1, &srv);
+		g_context->OMSetDepthStencilState(dss, stencilRef);
 		g_context->PSSetShader(oldPS, PSclassInstances, psCICount);
 		g_context->VSSetShader(oldVS, VSclassInstances, vsCICount);
 		g_context->IASetInputLayout(oldLayout);
@@ -203,6 +210,28 @@ HRESULT __stdcall hookedPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Fl
 		g_context->VSSetConstantBuffers(1, 1, &oldVSConstantBuffer1);
 		g_context->IASetVertexBuffers(0, 1, &oldVertexBuffers, &oldStrides, &oldOffsets);
 		g_context->IASetPrimitiveTopology(oldTopo);
+
+
+		SAFE_RELEASE(oldPS);
+		/*TODO SAfe release everything else
+		ID3D11VertexShader* oldVS;
+		ID3D11ClassInstance* PSclassInstances[256]; // 256 is max according to PSSetShader documentation
+		ID3D11ClassInstance* VSclassInstances[256];
+		UINT psCICount = 256;
+		UINT vsCICount = 256;
+		ID3D11Buffer* oldVertexBuffers;
+		UINT oldStrides;
+		UINT oldOffsets;
+		ID3D11InputLayout* oldLayout;
+		D3D11_PRIMITIVE_TOPOLOGY oldTopo;
+		ID3D11Buffer* oldPSConstantBuffer0;
+		ID3D11Buffer* oldVSConstantBuffer0;
+		ID3D11Buffer* oldPSConstantBuffer1;
+		ID3D11Buffer* oldVSConstantBuffer1;
+		ID3D11RasterizerState* rs;
+		ID3D11SamplerState* ss;
+		ID3D11ShaderResourceView* srv;
+		ID3D11DepthStencilState* dss;*/
     }
     return g_oldPresent(This, SyncInterval, Flags);
 }
@@ -290,16 +319,17 @@ void VRDOFPlugin::Load()
 }
 
 bool testTexture(DWORD* current){
+	static int count = 1; //1 is probably it, 2 is unknown, 3 is too small, 4 is global shadow projections, 5 is unknown (but intriguing, also wrong size), 6 is too small,
 	__try{
 		DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
 		ID3D11Texture2D* t = (ID3D11Texture2D*)current;
 		D3D11_TEXTURE2D_DESC desc;
 		t->GetDesc(&desc);
 		format = desc.Format;
-		fprintf(out_file, "Found Texture: %d x %d, %d\n", desc.Width, desc.Height, desc.Format);
+		fprintf(out_file, "Found Texture: %d x %d, %d %s MSAA %d\n", desc.Width, desc.Height, desc.Format, (desc.BindFlags & D3D11_BIND_SHADER_RESOURCE)?"true":"false", desc.SampleDesc.Count);
 		fflush(out_file);
-		if(format == DXGI_FORMAT_R24G8_TYPELESS){
-			return true;
+		if(format == DXGI_FORMAT_R24G8_TYPELESS && desc.Width == 1920 && desc.Height == 1080){
+			return !(--count);
 		}
 	}__except(1){
 		return false;
@@ -330,13 +360,7 @@ void VRDOFPlugin::EnterRealtime()
 	g_depthTexture = (ID3D11Texture2D*) findInstance(pSearchTexture, pVtable, testTexture);
 	if(g_depthTexture){
 		WriteLog("Found depth buffer texture");
-
-		D3D11_SHADER_RESOURCE_VIEW_DESC sr_desc;
-		sr_desc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
-		sr_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-		sr_desc.Texture2D.MostDetailedMip = 0;
-		sr_desc.Texture2D.MipLevels = -1;
-		g_d3dDevice->CreateShaderResourceView(g_depthTexture, &sr_desc, &g_DepthShaderResourceView);
+		g_d3dDevice->CreateShaderResourceView(g_depthTexture, NULL, &g_DepthShaderResourceView);
 	}else
 		WriteLog("No depth buffer texture found!");
 
@@ -886,4 +910,9 @@ void VRDOFPlugin::InitPipeline(){
 	if ( FAILED( hr ) ){
 		WriteLog("Failed to create sampler state");
 	}
+
+	D3D11_DEPTH_STENCIL_DESC depthDesc;
+	ZeroMemory(&depthDesc, sizeof(D3D11_DEPTH_STENCIL_DESC));
+	depthDesc.DepthEnable = FALSE;
+	g_d3dDevice->CreateDepthStencilState(&depthDesc, &g_DepthStencilState);
 }

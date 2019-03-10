@@ -14,6 +14,8 @@ rF2 VRDOF
 #define LINUX 
 //#undef LINUX
 
+//Is this not working? Disable MSAA and use FXAA
+
 #if _WIN64
   #define LOG_FILE              "Bin64\\Plugins\\VRDOF.log"
 #else
