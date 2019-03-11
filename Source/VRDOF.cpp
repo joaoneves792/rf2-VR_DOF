@@ -15,10 +15,11 @@ rF2 VR DOF
 #define BEA_ENGINE_STATIC  /* specify the usage of a static version of BeaEngine */
 #define BEA_USE_STDCALL    /* specify the usage of a stdcall version of BeaEngine */
 #include <BeaEngine.h>
- 
 #pragma comment(lib, "BeaEngine_s_d.lib")
 //#pragma comment(lib, "BeaEngine64.lib")
 
+#include <openvr.h>
+#pragma comment(lib, "openvr_api.lib")
 
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3d11.lib")
@@ -59,16 +60,17 @@ namespace VRDOF{
     ID3D11Device* g_d3dDevice = NULL;
     IDXGISwapChain* g_swapchain = NULL;
     ID3D11DeviceContext* g_context = NULL;
+	vr::IVRCompositor* g_compositor = NULL;
     
 	ID3D11Texture2D* g_depthTexture = NULL;
 
     typedef HRESULT(__stdcall *D3D11PresentHook) (IDXGISwapChain* This, UINT SyncInterval, UINT Flags);
     typedef HRESULT(__stdcall *D3D11CreateTextureHook) (const D3D11_TEXTURE2D_DESC *pDesc, const D3D11_SUBRESOURCE_DATA *pInitialData, ID3D11Texture2D **ppTexture2D);
+	typedef vr::EVRCompositorError(*SubmitHook) ( vr::EVREye eEye, const vr::Texture_t *pTexture, const vr::VRTextureBounds_t* pBounds, vr::EVRSubmitFlags nSubmitFlags);
 
-    D3D11PresentHook g_oldPresent;
-    D3D11CreateTextureHook g_oldCreateTexture; //TODO dont hook this, its useless, refactor to hook VRsubmit
-	
-	struct HookContext{
+	SubmitHook g_oldSubmit = NULL;
+
+    struct HookContext{
         BYTE original_code[64];
         SIZE_T dst_ptr;
         BYTE near_jmp[5];
@@ -88,57 +90,21 @@ namespace VRDOF{
 	ID3D11SamplerState* g_d3dSamplerState;
 	ID3D11ShaderResourceView* g_DepthShaderResourceView;
 	ID3D11DepthStencilState* g_DepthStencilState; //to disable depth writes
-
-
+	ID3D11Texture2D* g_renderTargetTextureMap;
+	ID3D11RenderTargetView* g_renderTargetViewMap;
+	ID3D11ShaderResourceView* g_shaderResourceViewMap;
 }
 
 using namespace VRDOF;
 
 void draw(){
-	static unsigned char active = 4;
-	static bool s_yellow = false;
-	if(g_realtime){
-		D3D11_MAPPED_SUBRESOURCE ms;
-		if(g_inPits && !s_yellow){
-			s_yellow = true;
-			g_context->Map(g_pLightColorCBuffer, NULL, D3D11_MAP_WRITE_DISCARD,  NULL, &ms);
-			cbLights* lightsDataPtr = (cbLights*)ms.pData;
-			lightsDataPtr->color = 1.0f;
-			lightsDataPtr->count = 4.0f;	
-			g_context->Unmap(g_pLightColorCBuffer, NULL);
-		}
-		if(s_yellow && !g_inPits){
-			s_yellow = false;
-			g_context->Map(g_pLightColorCBuffer, NULL, D3D11_MAP_WRITE_DISCARD,  NULL, &ms);
-			cbLights* lightsDataPtr = (cbLights*)ms.pData;
-			lightsDataPtr->color = 0.0f;
-			lightsDataPtr->count = 4.0f;	
-			g_context->Unmap(g_pLightColorCBuffer, NULL);
-		}
-		if(g_redActive != g_redCount && g_redActive != active){
-			s_yellow = false;
-			active = g_redActive;
-			g_context->Map(g_pLightColorCBuffer, NULL, D3D11_MAP_WRITE_DISCARD,  NULL, &ms);
-			cbLights* lightsDataPtr = (cbLights*)ms.pData;
-			lightsDataPtr->color = 0.0f;
-			lightsDataPtr->count = ceilf(((float)g_redActive/(float)(g_redCount-1))*4.0f);
-			if(lightsDataPtr->count < 1.0f){
-				lightsDataPtr->count = 1.0f;
-			}else if(lightsDataPtr->count > 4.0f){
-				lightsDataPtr->count = 4.0f;
-			}
-			g_context->Unmap(g_pLightColorCBuffer, NULL);
-		}
-	}
-
+	g_context->OMSetRenderTargets( 1, &g_renderTargetViewMap, NULL);
+	float bgColor[] = {0.0f, 0.0f, 0.0f, 1.0f};
+    g_context->ClearRenderTargetView(g_renderTargetViewMap, bgColor);
 	g_context->RSSetState(g_rs);
     g_context->VSSetShader(g_pVS, 0, 0);
     g_context->PSSetShader(g_pPS, 0, 0);
     g_context->IASetInputLayout(g_pLayout);
-	g_context->PSSetConstantBuffers( 0, 1, &g_pViewportCBuffer);
-    g_context->VSSetConstantBuffers( 0, 1, &g_pViewportCBuffer);
-	g_context->PSSetConstantBuffers( 1, 1, &g_pLightColorCBuffer);
-    g_context->VSSetConstantBuffers( 1, 1, &g_pLightColorCBuffer);
 	g_context->PSSetSamplers(0, 1, &g_d3dSamplerState);
 	g_context->PSSetShaderResources(0, 1, &g_DepthShaderResourceView);
 	g_context->OMSetDepthStencilState(g_DepthStencilState, 0);
@@ -153,8 +119,12 @@ void draw(){
 
 
 
-HRESULT __stdcall hookedPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags){
+vr::EVRCompositorError hookedSubmit( vr::EVREye eEye, const vr::Texture_t *pTexture, const vr::VRTextureBounds_t* pBounds, vr::EVRSubmitFlags nSubmitFlags){
+	fprintf(out_file, "hooked\n");
+	fflush(out_file);
 	if(g_realtime && pShaderCompiler && g_pVS && (g_inPits || g_redlights)){
+		fprintf(out_file, "drawing\n");
+		fflush(out_file);
 		ID3D11PixelShader* oldPS;
 		ID3D11VertexShader* oldVS;
 		ID3D11ClassInstance* PSclassInstances[256]; // 256 is max according to PSSetShader documentation
@@ -175,12 +145,14 @@ HRESULT __stdcall hookedPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Fl
 		ID3D11ShaderResourceView* srv;
 		ID3D11DepthStencilState* dss;
 		UINT stencilRef;
-
+		ID3D11RenderTargetView* rtv;
+		ID3D11DepthStencilView* dsv;
 
 		//What the hell is all this crap, you may ask?
 		//Well rf2 seems to use gets to retrieve resources that were used when drawing the last frame
 		//And then attemps to use them, if we dont revert all state back to how we found it, then there will be graphical glitches
 		//Evidence of this? I found a pointer to g_PS in a trace of d3d11 calls outside of our hooked Present
+		g_context->OMGetRenderTargets(1, &rtv, &dsv);
 		g_context->RSGetState(&rs);
 		g_context->PSGetSamplers(0, 1, &ss);
 		g_context->PSGetShaderResources(0, 1, &srv);
@@ -197,6 +169,7 @@ HRESULT __stdcall hookedPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Fl
 
 		draw();//Actually do our stuff...
 
+		g_context->OMSetRenderTargets(1, &rtv, dsv);
 		g_context->RSSetState(rs);
 		g_context->PSSetSamplers(0, 1, &ss);
 		g_context->PSGetShaderResources(0, 1, &srv);
@@ -210,39 +183,15 @@ HRESULT __stdcall hookedPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Fl
 		g_context->VSSetConstantBuffers(1, 1, &oldVSConstantBuffer1);
 		g_context->IASetVertexBuffers(0, 1, &oldVertexBuffers, &oldStrides, &oldOffsets);
 		g_context->IASetPrimitiveTopology(oldTopo);
+		
+		vr::Texture_t vrTexture = { ( void * ) g_renderTargetTextureMap, vr::TextureType_DirectX, vr::ColorSpace_Gamma };
+		return g_oldSubmit(eEye, &vrTexture, pBounds, nSubmitFlags);
+	}
 
-
-		SAFE_RELEASE(oldPS);
-		/*TODO SAfe release everything else
-		ID3D11VertexShader* oldVS;
-		ID3D11ClassInstance* PSclassInstances[256]; // 256 is max according to PSSetShader documentation
-		ID3D11ClassInstance* VSclassInstances[256];
-		UINT psCICount = 256;
-		UINT vsCICount = 256;
-		ID3D11Buffer* oldVertexBuffers;
-		UINT oldStrides;
-		UINT oldOffsets;
-		ID3D11InputLayout* oldLayout;
-		D3D11_PRIMITIVE_TOPOLOGY oldTopo;
-		ID3D11Buffer* oldPSConstantBuffer0;
-		ID3D11Buffer* oldVSConstantBuffer0;
-		ID3D11Buffer* oldPSConstantBuffer1;
-		ID3D11Buffer* oldVSConstantBuffer1;
-		ID3D11RasterizerState* rs;
-		ID3D11SamplerState* ss;
-		ID3D11ShaderResourceView* srv;
-		ID3D11DepthStencilState* dss;*/
-    }
-    return g_oldPresent(This, SyncInterval, Flags);
+	
+	//vr::VRCompositor()->Submit(eEye, pTexture, pBounds, nSubmitFlags);
+	return g_oldSubmit(eEye, pTexture, pBounds, nSubmitFlags);
 }
-
-HRESULT __stdcall hookedCreateTexture(const D3D11_TEXTURE2D_DESC *pDesc, const D3D11_SUBRESOURCE_DATA *pInitialData, ID3D11Texture2D **ppTexture2D){
-	fprintf(out_file, "CreateTexture2D: %d x %d, %d\n", pDesc->Width, pDesc->Height, pDesc->Format);
-	fflush(out_file);
-	return g_oldCreateTexture(pDesc, pInitialData, ppTexture2D);
-}
-
-
 
 VRDOFPlugin::~VRDOFPlugin(){
     SAFE_RELEASE(g_pLayout)
@@ -300,16 +249,6 @@ void VRDOFPlugin::Load()
                 g_d3dDevice->GetImmediateContext(&g_context);
                 if(g_context){
                     WriteLog("Found Context");
-					/*if(!g_oldCreateTexture){
-						DWORD_PTR* pDeviceVtable = (DWORD_PTR*)g_d3dDevice;
-						pDeviceVtable = (DWORD_PTR*)pDeviceVtable[0];
-						g_oldCreateTexture = (D3D11CreateTextureHook)placeDetour((BYTE*)pDeviceVtable[16], (BYTE*)hookedCreateTexture, 1);
-						if(g_oldCreateTexture){
-							WriteLog("CreateTexture2D Hook successfull");
-						}else{
-							WriteLog("Unable to hook CreateTexture2D");
-						}
-					}*/
                     InitPipeline();
                 }
             }
@@ -328,7 +267,7 @@ bool testTexture(DWORD* current){
 		format = desc.Format;
 		fprintf(out_file, "Found Texture: %d x %d, %d %s MSAA %d\n", desc.Width, desc.Height, desc.Format, (desc.BindFlags & D3D11_BIND_SHADER_RESOURCE)?"true":"false", desc.SampleDesc.Count);
 		fflush(out_file);
-		if(format == DXGI_FORMAT_R24G8_TYPELESS && desc.Width == 1920 && desc.Height == 1080){
+		if(format == DXGI_FORMAT_R24G8_TYPELESS){
 			return !(--count);
 		}
 	}__except(1){
@@ -337,37 +276,98 @@ bool testTexture(DWORD* current){
 	return false;
 }
 
+bool testCompositor(DWORD* current){
+	__try{
+		vr::IVRCompositor* c = (vr::IVRCompositor*)current;
+		c->CanRenderScene();
+    }__except(1){
+		return false;
+	}
+	return true;
+}
+
 void VRDOFPlugin::EnterRealtime()
 {
     g_realtime = true;
     WriteLog("---ENTERREALTIME---");
 
-    if(!g_oldPresent){
-        //Only hook present when entering realtime to prevent things like the steam overlay from overriding our hook
-        DWORD_PTR* pSwapChainVtable = (DWORD_PTR*)g_swapchain;
-        pSwapChainVtable = (DWORD_PTR*)pSwapChainVtable[0];
-        g_oldPresent = (D3D11PresentHook)placeDetour((BYTE*)pSwapChainVtable[8], (BYTE*)hookedPresent, 0);
-        if(g_oldPresent){
-            WriteLog("Present Hook successfull");
+    if(!g_oldSubmit){
+		vr::IVRCompositor* searchCompositor = vr::VRCompositor();
+		DWORD pVtable = *(DWORD*)searchCompositor;
+		g_compositor = (vr::IVRCompositor*) findInstance(searchCompositor, pVtable, testCompositor);
+		if(g_compositor)
+			WriteLog("Found Compositor");
+		else
+			WriteLog("Unable to find Compositor");
+
+        //Only hook submit when entering realtime to prevent things like the steam overlay from overriding our hook
+		DWORD_PTR* pCompositorVtable = (DWORD_PTR*)g_compositor;
+        pCompositorVtable = (DWORD_PTR*)pCompositorVtable[0];
+		g_oldSubmit = (SubmitHook)placeDetour((BYTE*)pCompositorVtable[40], (BYTE*)hookedSubmit, 0);
+        if(g_oldSubmit){
+            WriteLog("Submit Hook successfull");
         }else{
-            WriteLog("Unable to hook Present");
+            WriteLog("Unable to hook Submit");
         }
     }
 
-	ID3D11Texture2D *pSearchTexture;
-	CreateSearchTexture(g_d3dDevice, &pSearchTexture);
-	DWORD pVtable = *(DWORD*)pSearchTexture;
-	g_depthTexture = (ID3D11Texture2D*) findInstance(pSearchTexture, pVtable, testTexture);
-	if(g_depthTexture){
-		WriteLog("Found depth buffer texture");
-		g_d3dDevice->CreateShaderResourceView(g_depthTexture, NULL, &g_DepthShaderResourceView);
-	}else
-		WriteLog("No depth buffer texture found!");
+	if(g_oldSubmit){
+		ID3D11Texture2D *pSearchTexture;
+		CreateSearchTexture(g_d3dDevice, &pSearchTexture);
+		DWORD pVtable = *(DWORD*)pSearchTexture;
+		g_depthTexture = (ID3D11Texture2D*) findInstance(pSearchTexture, pVtable, testTexture);
+		if(g_depthTexture){
+			WriteLog("Found depth buffer texture");
+			g_d3dDevice->CreateShaderResourceView(g_depthTexture, NULL, &g_DepthShaderResourceView);
+		}else
+			WriteLog("No depth buffer texture found!");
+		SAFE_RELEASE(pSearchTexture);
+	}
+	if(g_DepthShaderResourceView){
+		//Create a new render target
+		D3D11_TEXTURE2D_DESC depthDesc;
+		g_depthTexture->GetDesc(&depthDesc);
+		
+		
+		
+		D3D11_TEXTURE2D_DESC textureDesc;
+		D3D11_RENDER_TARGET_VIEW_DESC renderTargetViewDesc;
+		D3D11_SHADER_RESOURCE_VIEW_DESC shaderResourceViewDesc;
 
+		ZeroMemory(&textureDesc, sizeof(textureDesc));
+		textureDesc.Width = depthDesc.Width;
+		textureDesc.Height = depthDesc.Height;
+		textureDesc.MipLevels = 1;
+		textureDesc.ArraySize = 1;
+		textureDesc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+		textureDesc.SampleDesc.Count = 1;
+	    textureDesc.Usage = D3D11_USAGE_DEFAULT;
+		textureDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+	    textureDesc.CPUAccessFlags = 0;
+		textureDesc.MiscFlags = 0;
+
+		g_d3dDevice->CreateTexture2D(&textureDesc, NULL, &g_renderTargetTextureMap);
+		
+		renderTargetViewDesc.Format = textureDesc.Format;
+		renderTargetViewDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+		renderTargetViewDesc.Texture2D.MipSlice = 0;
+
+		// Create the render target view.
+		g_d3dDevice->CreateRenderTargetView(g_renderTargetTextureMap, &renderTargetViewDesc, &g_renderTargetViewMap);
+
+		shaderResourceViewDesc.Format = textureDesc.Format;
+		shaderResourceViewDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		shaderResourceViewDesc.Texture2D.MostDetailedMip = 0;
+		shaderResourceViewDesc.Texture2D.MipLevels = 1;
+
+		// Create the shader resource view.
+		g_d3dDevice->CreateShaderResourceView(g_renderTargetTextureMap, &shaderResourceViewDesc, &g_shaderResourceViewMap);
+	}
     if(!g_d3dDevice || !g_swapchain || !g_context)
         WriteLog("Failed to find dx11 resources");
 	
-	
+	vr::Texture_t vrTexture = { ( void * ) g_depthTexture, vr::TextureType_DirectX, vr::ColorSpace_Gamma };
+	g_compositor->Submit(vr::Eye_Left, &vrTexture);
 }
 
 void VRDOFPlugin::ExitRealtime()
@@ -375,6 +375,10 @@ void VRDOFPlugin::ExitRealtime()
     g_realtime = false;
     //g_messageDisplayed = false;
     WriteLog("---EXITREALTIME---");
+
+	//SAFE_RELEASE(g_renderTargetTextureMap);
+	//SAFE_RELEASE(g_renderTargetViewMap);
+	//SAFE_RELEASE(g_shaderResourceViewMap);
 }
 
 void VRDOFPlugin::UpdateScoring( const ScoringInfoV01 &info ){
@@ -405,7 +409,7 @@ bool VRDOFPlugin::WantsToDisplayMessage( MessageInfoV01 &msgInfo )
 {
 	if(g_realtime && !g_messageDisplayed){
         
-        if(g_d3dDevice && g_swapchain && g_oldPresent && g_pPS && g_oldCreateTexture)
+        if(g_d3dDevice && g_swapchain && g_oldSubmit && g_pPS)
             sprintf(msgInfo.mText, "VRDOF OK");
         else
             sprintf(msgInfo.mText, "VRDOF FAILURE");
@@ -605,6 +609,8 @@ bool testSwapChain(DWORD* current){
 	return true;
 }
 
+
+
 //based on https://www.unknowncheats.me/forum/d3d-tutorials-source/121840-hook-directx-11-dynamically.html by smallC
 void* VRDOFPlugin::findInstance(void* pvReplica, DWORD dwVTable, bool (*test)(DWORD* current)){
 #ifdef _AMD64_
@@ -787,6 +793,9 @@ IDXGISwapChain* VRDOFPlugin::getDX11SwapChain(){
     SAFE_RELEASE(pSearchSwapChain)    
     SAFE_RELEASE(pContext)
     SAFE_RELEASE(pDevice)
+
+
+
 
     return pSwapChain;
  }

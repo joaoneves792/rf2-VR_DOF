@@ -311,6 +311,7 @@
     <ClInclude Include="..\Include\InternalsPlugin.hpp" />
     <ClInclude Include="..\Include\PluginObjects.hpp" />
     <ClInclude Include="..\Include\shaders.h" />
+    <ClInclude Include="..\Include\openvr.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
