@@ -81,7 +81,8 @@ private:
     void WriteLog(const char * const msg);
     void hexDump (char *desc, void *addr, int len);
     const unsigned int DisasmLengthCheck(const SIZE_T address, const unsigned int jumplength);
-    const DWORD DisasmRecalculateOffset(const SIZE_T srcaddress, const SIZE_T detourAddress);
+	const unsigned int DisasmLog(const SIZE_T address, const unsigned int length);
+	const DWORD DisasmRecalculateOffset(const SIZE_T srcaddress, const SIZE_T detourAddress);
 
     IDXGISwapChain* getDX11SwapChain();
     void CreateSearchSwapChain(ID3D11Device* device, IDXGISwapChain** tempSwapChain, HWND hwnd);

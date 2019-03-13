@@ -66,16 +66,16 @@ namespace VRDOF{
 
     typedef HRESULT(__stdcall *D3D11PresentHook) (IDXGISwapChain* This, UINT SyncInterval, UINT Flags);
     typedef HRESULT(__stdcall *D3D11CreateTextureHook) (const D3D11_TEXTURE2D_DESC *pDesc, const D3D11_SUBRESOURCE_DATA *pInitialData, ID3D11Texture2D **ppTexture2D);
-	typedef vr::EVRCompositorError(*SubmitHook) ( vr::EVREye eEye, const vr::Texture_t *pTexture, const vr::VRTextureBounds_t* pBounds, vr::EVRSubmitFlags nSubmitFlags);
+	typedef vr::EVRCompositorError(__fastcall *SubmitHook) (void* pThis, vr::EVREye eEye, const vr::Texture_t *pTexture, const vr::VRTextureBounds_t* pBounds, vr::EVRSubmitFlags nSubmitFlags);
 
 	SubmitHook g_oldSubmit = NULL;
 
     struct HookContext{
         BYTE original_code[64];
         SIZE_T dst_ptr;
-        BYTE near_jmp[5];
+        BYTE jump[6+8]; //Use 5 for near jump
     };
-    HookContext* hook[2];
+    HookContext* hook[1];
 
 
 
@@ -119,10 +119,13 @@ void draw(){
 
 
 
-vr::EVRCompositorError hookedSubmit( vr::EVREye eEye, const vr::Texture_t *pTexture, const vr::VRTextureBounds_t* pBounds, vr::EVRSubmitFlags nSubmitFlags){
+vr::EVRCompositorError __fastcall hookedSubmit(void* pThis, vr::EVREye eEye, const vr::Texture_t *pTexture, const vr::VRTextureBounds_t* pBounds, vr::EVRSubmitFlags nSubmitFlags){
 	fprintf(out_file, "hooked\n");
 	fflush(out_file);
-	if(g_realtime && pShaderCompiler && g_pVS && (g_inPits || g_redlights)){
+	//vr::VRCompositor()->Submit(eEye, pTexture, pBounds, nSubmitFlags);
+	return g_oldSubmit(pThis, eEye, pTexture, pBounds, nSubmitFlags);
+	
+	/*if(g_realtime && pShaderCompiler && g_pVS && (g_inPits || g_redlights)){
 		fprintf(out_file, "drawing\n");
 		fflush(out_file);
 		ID3D11PixelShader* oldPS;
@@ -190,7 +193,8 @@ vr::EVRCompositorError hookedSubmit( vr::EVREye eEye, const vr::Texture_t *pText
 
 	
 	//vr::VRCompositor()->Submit(eEye, pTexture, pBounds, nSubmitFlags);
-	return g_oldSubmit(eEye, pTexture, pBounds, nSubmitFlags);
+	//g_swapchain->Present(0, 0);
+	return g_oldSubmit(eEye, pTexture, pBounds, nSubmitFlags);*/
 }
 
 VRDOFPlugin::~VRDOFPlugin(){
@@ -303,12 +307,16 @@ void VRDOFPlugin::EnterRealtime()
         //Only hook submit when entering realtime to prevent things like the steam overlay from overriding our hook
 		DWORD_PTR* pCompositorVtable = (DWORD_PTR*)g_compositor;
         pCompositorVtable = (DWORD_PTR*)pCompositorVtable[0];
-		g_oldSubmit = (SubmitHook)placeDetour((BYTE*)pCompositorVtable[40], (BYTE*)hookedSubmit, 0);
-        if(g_oldSubmit){
-            WriteLog("Submit Hook successfull");
-        }else{
-            WriteLog("Unable to hook Submit");
-        }
+		//call qword [r10 + 0x28]
+		// 0x28 = 40
+		// 40/8 = 5 (bytes to 64bit words)
+		g_oldSubmit = (SubmitHook)placeDetour((BYTE*)pCompositorVtable[5], (BYTE*)hookedSubmit, 0);
+		if(g_oldSubmit){
+			WriteLog("Submit Hook successfull");
+		}else{
+			WriteLog("Unable to hook Submit");
+		}
+		//}
     }
 
 	if(g_oldSubmit){
@@ -441,6 +449,28 @@ const DWORD VRDOFPlugin::DisasmRecalculateOffset(const SIZE_T srcaddress, const 
 
 }
  
+const unsigned int VRDOFPlugin::DisasmLog(const SIZE_T address, const unsigned int length){
+	    DISASM disasm;
+        memset(&disasm, 0, sizeof(DISASM));
+        disasm.EIP = (UIntPtr)address;
+        disasm.Archi = 0x40;
+		
+		WriteLog("DisasmLog:");
+        unsigned int processed = 0;
+        while (processed < length){
+            const int len = Disasm(&disasm);
+            if (len == UNKNOWN_OPCODE)
+            {
+                ++disasm.EIP;
+            }else{
+                WriteLog(disasm.CompleteInstr);
+                processed += len;
+                disasm.EIP += len;
+            }
+        }
+        return processed;
+}
+
 const unsigned int VRDOFPlugin::DisasmLengthCheck(const SIZE_T address, const unsigned int jumplength){
         DISASM disasm;
         memset(&disasm, 0, sizeof(DISASM));
@@ -531,8 +561,8 @@ void VRDOFPlugin::hexDump (char *desc, void *addr, int len) {
 //based on: https://www.unknowncheats.me/forum/d3d-tutorials-and-source/88369-universal-d3d11-hook.html by evolution536
 void* VRDOFPlugin::placeDetour(BYTE* src, BYTE* dest, int index){
 #define _PTR_MAX_VALUE 0x7FFFFFFEFFFF
-//#define JMPLEN 6
-#define JMPLEN 5
+#define JMPLEN (6+8)
+//#define JMPLEN 5 //Use this for near jump
 
 #ifdef LINUX
     MEMORY_BASIC_INFORMATION64 mbi = {0};
@@ -546,7 +576,7 @@ void* VRDOFPlugin::placeDetour(BYTE* src, BYTE* dest, int index){
                 break;
 #endif
         if(mbi.State == MEM_FREE){
-            if (hook[index] = (HookContext*)VirtualAlloc((LPVOID)mbi.BaseAddress, 0x1000, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE)){
+            if (hook[index] = (HookContext*)VirtualAlloc((LPVOID)mbi.BaseAddress, sizeof(HookContext), MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE)){
                     break;
             }
         }
@@ -578,22 +608,30 @@ void* VRDOFPlugin::placeDetour(BYTE* src, BYTE* dest, int index){
         memcpy(hook[index]->original_code, src, length);
         memcpy(&(hook[index])->original_code[length], detour, sizeof(detour));
         *(SIZE_T*)&(hook[index])->original_code[length + 3] = (SIZE_T)src + length;
+		hexDump("patched original_code", hook[index]->original_code, sizeof(hook[index]->original_code));
+		DisasmLog((SIZE_T)hook[index]->original_code, sizeof(hook[index]->original_code));
     }
 
     // Build a far jump to the destination function.
-    //*(WORD*)&presenthook64->far_jmp = 0x25FF;
-    //*(DWORD*)(presenthook64->far_jmp + 2) = (DWORD)((SIZE_T)presenthook64 - (SIZE_T)src + FIELD_OFFSET(HookContext, dst_ptr) - 6);
-    //presenthook64->dst_ptr = (SIZE_T)dest;
-    *(WORD*)&(hook[index])->near_jmp = 0xE9;    
-    *(DWORD*)(hook[index]->near_jmp + 1) = (DWORD)((SIZE_T)dest - (SIZE_T)src - JMPLEN);
+	BYTE jump[] = { 0xFF, 0x25, 0x00, 0x00, 0x00, 0x00, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC};
+	memcpy(hook[index]->jump, jump, JMPLEN);
+	*(SIZE_T*)&(hook[index])->jump[6] = (SIZE_T)dest; //8 bytes
+
+	//Code for near jump
+    //*(WORD*)&(hook[index])->jump = 0xE9;    
+    //*(WORD*)(hook[index]->jump + 1) = (WORD)((SIZE_T)dest - (SIZE_T)src - JMPLEN);
 
      
     // Write the far/near jump code to the src function.
     DWORD flOld = 0;
     VirtualProtect(src, JMPLEN, PAGE_EXECUTE_READWRITE, &flOld);
-    memcpy(src, hook[index]->near_jmp, JMPLEN);
+    memcpy(src, hook[index]->jump, JMPLEN);
+	DisasmLog((SIZE_T)src, JMPLEN);
     VirtualProtect(src, JMPLEN, flOld, &flOld);
     
+	fprintf(out_file, "MEM: src:%p dest:%p\n", src, dest);
+	fflush(out_file);
+
     // Return a pointer to the code that will jump (using detour) to the src function
     return hook[index]->original_code;
 }
