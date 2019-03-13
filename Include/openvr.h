@@ -3157,7 +3157,7 @@ public:
 	virtual bool IsMotionSmoothingEnabled() = 0;
 };
 
-static const char * const IVRCompositor_Version = "IVRCompositor_022";
+static const char * const IVRCompositor_Version = "IVRCompositor_020"; //JOAO Very important, this must match the same version that the game uses!!!!
 
 } // namespace vr
 

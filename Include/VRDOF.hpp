@@ -41,9 +41,7 @@ typedef HRESULT (WINAPI *pD3DCompile)
      ID3DBlob**                      ppErrorMsgs);
 
 
-#define PRESENT_INDEX 8
-//16 because we are 64bit
-#define PRESENT_JUMP_LENGTH 16 
+
 
 __declspec(align(16))
 struct cbViewport{
@@ -79,18 +77,15 @@ public:
 
 private:
     void WriteLog(const char * const msg);
-    void hexDump (char *desc, void *addr, int len);
-    const unsigned int DisasmLengthCheck(const SIZE_T address, const unsigned int jumplength);
-	const unsigned int DisasmLog(const SIZE_T address, const unsigned int length);
-	const DWORD DisasmRecalculateOffset(const SIZE_T srcaddress, const SIZE_T detourAddress);
+   
 
     IDXGISwapChain* getDX11SwapChain();
     void CreateSearchSwapChain(ID3D11Device* device, IDXGISwapChain** tempSwapChain, HWND hwnd);
     void CreateSearchDevice(ID3D11Device** pDevice, ID3D11DeviceContext** pContext);
 	void CreateSearchTexture(ID3D11Device* pDevice, ID3D11Texture2D** ppTexture);
     void CreateInvisibleWindow(HWND* hwnd);
-    void* findInstance(void* pvReplica, DWORD dwVTable, bool (*test)(DWORD* current));
-    void* placeDetour(BYTE* src, BYTE* dest, int index);
+
+
 
     void InitPipeline();
 };
