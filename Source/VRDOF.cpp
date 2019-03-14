@@ -68,14 +68,19 @@ ID3D11SamplerState* g_d3dSamplerState;
 ID3D11ShaderResourceView* g_DepthShaderResourceView;
 ID3D11ShaderResourceView* g_ColorShaderResourceView;
 ID3D11DepthStencilState* g_DepthStencilState; //to disable depth writes
-ID3D11Texture2D* g_renderTargetTextureMap;
-ID3D11RenderTargetView* g_renderTargetViewMap;
+ID3D11Texture2D* g_dofTexture;
+ID3D11RenderTargetView* g_dofTargetView;
+ID3D11ShaderResourceView* g_dofResourceView;
+ID3D11Texture2D* g_fxaaTexture;
+ID3D11RenderTargetView* g_fxaaView;
 
 
 void draw(){
-	g_context->OMSetRenderTargets( 1, &g_renderTargetViewMap, NULL);
+
+	//Do DOF pass
+	g_context->OMSetRenderTargets( 1, &g_dofTargetView, NULL);
 	float bgColor[] = {0.0f, 0.0f, 0.0f, 1.0f};
-    g_context->ClearRenderTargetView(g_renderTargetViewMap, bgColor);
+    g_context->ClearRenderTargetView(g_dofTargetView, bgColor);
 	g_context->RSSetState(g_rs);
     g_context->VSSetShader(g_pVS, 0, 0);
     g_context->PSSetShader(g_pPS, 0, 0);
@@ -91,6 +96,23 @@ void draw(){
 		
     g_context->Draw(6, 0);
 	
+	//Do FXAA pass
+	SAFE_RELEASE(g_dofResourceView);
+	g_d3dDevice->CreateShaderResourceView(g_dofTexture, NULL, &g_dofResourceView);
+
+	g_context->OMSetRenderTargets( 1, &g_fxaaView, NULL);
+    g_context->ClearRenderTargetView(g_fxaaView, bgColor);
+	g_context->RSSetState(g_rs);
+    g_context->VSSetShader(g_pVS, 0, 0);
+    g_context->PSSetShader(g_pFXAAPS, 0, 0);
+    g_context->IASetInputLayout(g_pLayout);
+	g_context->PSSetSamplers(0, 1, &g_d3dSamplerState);
+	g_context->PSSetShaderResources(0, 1, &g_dofResourceView);
+	g_context->OMSetDepthStencilState(g_DepthStencilState, 0);
+    g_context->IASetVertexBuffers(0, 1, &g_pVBuffer, &stride, &offset);
+    g_context->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+    g_context->Draw(6, 0);
 }
 
 
@@ -173,7 +195,9 @@ vr::EVRCompositorError __fastcall hookedSubmit(void* pThis, vr::EVREye eEye, con
 		g_context->IASetVertexBuffers(0, 1, &oldVertexBuffers, &oldStrides, &oldOffsets);
 		g_context->IASetPrimitiveTopology(oldTopo);
 		
-		vr::Texture_t vrTexture = { ( void * ) g_renderTargetTextureMap, vr::TextureType_DirectX, vr::ColorSpace_Gamma };
+		//vr::Texture_t vrTexture = { ( void * ) g_dofTexture, vr::TextureType_DirectX, vr::ColorSpace_Gamma };
+		vr::Texture_t vrTexture = { ( void * ) g_fxaaTexture, vr::TextureType_DirectX, vr::ColorSpace_Gamma };
+		
 		return g_oldSubmit(pThis, eEye, &vrTexture, pBounds, nSubmitFlags);
 	}
 
@@ -325,14 +349,16 @@ void VRDOFPlugin::EnterRealtime()
 			textureDesc.CPUAccessFlags = 0;
 			textureDesc.MiscFlags = 0;
 
-			g_d3dDevice->CreateTexture2D(&textureDesc, NULL, &g_renderTargetTextureMap);
-		
+			g_d3dDevice->CreateTexture2D(&textureDesc, NULL, &g_dofTexture);
+			g_d3dDevice->CreateTexture2D(&textureDesc, NULL, &g_fxaaTexture);
+
 			renderTargetViewDesc.Format = textureDesc.Format;
 			renderTargetViewDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
 			renderTargetViewDesc.Texture2D.MipSlice = 0;
 
 			// Create the render target view.
-			g_d3dDevice->CreateRenderTargetView(g_renderTargetTextureMap, &renderTargetViewDesc, &g_renderTargetViewMap);
+			g_d3dDevice->CreateRenderTargetView(g_dofTexture, &renderTargetViewDesc, &g_dofTargetView);
+			g_d3dDevice->CreateRenderTargetView(g_fxaaTexture, &renderTargetViewDesc, &g_fxaaView);
 
 			/*D3D11_MAPPED_SUBRESOURCE ms;
 			g_context->Map(g_pViewportCBuffer, NULL, D3D11_MAP_WRITE_DISCARD,  NULL, &ms);
