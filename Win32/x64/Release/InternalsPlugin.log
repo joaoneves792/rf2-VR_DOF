@@ -1,15 +1,17 @@
-﻿Build started 3/13/2019 10:50:00 AM.
-     1>Project "C:\Users\joao\Documents\Visual Studio 2012\Projects\rf2-VRDOF\Win32\InternalsPlugin.vcxproj" on node 2 (Build target(s)).
+﻿Build started 3/14/2019 3:18:38 AM.
+     1>Project "C:\Users\joao\Documents\Visual Studio 2012\Projects\rf2-VRDOF\Win32\InternalsPlugin.vcxproj" on node 2 (Rebuild target(s)).
      1>ClCompile:
-         C:\Program Files (x86)\Microsoft Visual Studio 11.0\VC\bin\x86_amd64\CL.exe /c /I. /I..\include /Zi /nologo /W3 /WX- /O2 /Ob1 /D WIN32 /D NDEBUG /D _WINDOWS /D _USRDLL /D INTERNALSPLUGIN_EXPORTS /D _CRT_SECURE_NO_DEPRECATE /D _SECURE_SCL=0 /D _VC80_UPGRADE=0x0600 /D _WINDLL /D _MBCS /GF /Gm- /EHsc /MD /Zp16 /GS /Gy /fp:precise /Zc:wchar_t /Zc:forScope /Fo".\Release/" /Fd".\Release/vc110.pdb" /Gr /TP /errorReport:prompt ..\source\VRDOF.cpp
+         C:\Program Files (x86)\Microsoft Visual Studio 11.0\VC\bin\x86_amd64\CL.exe /c /I. /I..\include /Zi /nologo /W3 /WX- /O2 /Ob1 /D WIN32 /D NDEBUG /D _WINDOWS /D _USRDLL /D INTERNALSPLUGIN_EXPORTS /D _CRT_SECURE_NO_DEPRECATE /D _SECURE_SCL=0 /D _VC80_UPGRADE=0x0600 /D _WINDLL /D _MBCS /GF /Gm- /EHsc /MD /Zp16 /GS /Gy /fp:precise /Zc:wchar_t /Zc:forScope /Fo".\Release/" /Fd".\Release/vc110.pdb" /Gr /TP /errorReport:prompt ..\source\VRDOF.cpp ..\source\hooking.cpp
          VRDOF.cpp
+         hooking.cpp
+         Generating Code...
        Link:
          C:\Program Files (x86)\Microsoft Visual Studio 11.0\VC\bin\x86_amd64\link.exe /ERRORREPORT:PROMPT /OUT:".\x64\Release\VRDOF.dll" /INCREMENTAL:NO /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /MANIFEST:NO /PDB:"C:\Users\joao\Documents\Visual Studio 2012\Projects\rf2-VRDOF\Win32\x64\Release\VRDOF.pdb" /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:".\Release/InternalsPlugin.lib" /MACHINE:X64 /DLL .\Release/VRDOF.obj
          .\Release/hooking.obj
             Creating library .\Release/InternalsPlugin.lib and object .\Release/InternalsPlugin.exp
          InternalsPlugin.vcxproj -> C:\Users\joao\Documents\Visual Studio 2012\Projects\rf2-VRDOF\Win32\x64\Release\VRDOF.dll
-     1>Done Building Project "C:\Users\joao\Documents\Visual Studio 2012\Projects\rf2-VRDOF\Win32\InternalsPlugin.vcxproj" (Build target(s)).
+     1>Done Building Project "C:\Users\joao\Documents\Visual Studio 2012\Projects\rf2-VRDOF\Win32\InternalsPlugin.vcxproj" (Rebuild target(s)).
 
 Build succeeded.
 
-Time Elapsed 00:00:01.71
+Time Elapsed 00:00:01.95

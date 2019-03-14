@@ -45,11 +45,6 @@ FILE* out_file = NULL;
 bool g_realtime = false;
 bool g_messageDisplayed = false;
 
-bool g_inPits = false;
-bool g_redlights = false;
-unsigned char g_redCount = 4;
-unsigned char g_redActive = 4;
-
 ID3D11Device* g_tempd3dDevice = NULL;
 ID3D11Device* g_d3dDevice = NULL;
 IDXGISwapChain* g_swapchain = NULL;
@@ -58,8 +53,6 @@ vr::IVRCompositor* g_compositor = NULL;
     
 ID3D11Texture2D* g_depthTexture = NULL;
 
-typedef HRESULT(__stdcall *D3D11PresentHook) (IDXGISwapChain* This, UINT SyncInterval, UINT Flags);
-typedef HRESULT(__stdcall *D3D11CreateTextureHook) (const D3D11_TEXTURE2D_DESC *pDesc, const D3D11_SUBRESOURCE_DATA *pInitialData, ID3D11Texture2D **ppTexture2D);
 typedef vr::EVRCompositorError(__fastcall *SubmitHook) (void* pThis, vr::EVREye eEye, const vr::Texture_t *pTexture, const vr::VRTextureBounds_t* pBounds, vr::EVRSubmitFlags nSubmitFlags);
 
 SubmitHook g_oldSubmit = NULL;
@@ -69,15 +62,13 @@ ID3D11VertexShader *g_pVS = NULL;
 ID3D11PixelShader *g_pPS;   
 ID3D11InputLayout *g_pLayout;
 ID3D11Buffer *g_pVBuffer;
-ID3D11Buffer *g_pViewportCBuffer;
-ID3D11Buffer *g_pLightColorCBuffer;
 ID3D11RasterizerState* g_rs;
 ID3D11SamplerState* g_d3dSamplerState;
 ID3D11ShaderResourceView* g_DepthShaderResourceView;
+ID3D11ShaderResourceView* g_ColorShaderResourceView;
 ID3D11DepthStencilState* g_DepthStencilState; //to disable depth writes
 ID3D11Texture2D* g_renderTargetTextureMap;
 ID3D11RenderTargetView* g_renderTargetViewMap;
-ID3D11ShaderResourceView* g_shaderResourceViewMap;
 
 
 void draw(){
@@ -90,6 +81,7 @@ void draw(){
     g_context->IASetInputLayout(g_pLayout);
 	g_context->PSSetSamplers(0, 1, &g_d3dSamplerState);
 	g_context->PSSetShaderResources(0, 1, &g_DepthShaderResourceView);
+	g_context->PSSetShaderResources(1, 1, &g_ColorShaderResourceView);
 	g_context->OMSetDepthStencilState(g_DepthStencilState, 0);
     UINT stride = sizeof(float)*3;
     UINT offset = 0;
@@ -113,14 +105,7 @@ bool testCompositor(DWORD* current){
 
 
 vr::EVRCompositorError __fastcall hookedSubmit(void* pThis, vr::EVREye eEye, const vr::Texture_t *pTexture, const vr::VRTextureBounds_t* pBounds, vr::EVRSubmitFlags nSubmitFlags){
-	//fprintf(out_file, "hooked\n");
-	//fflush(out_file);
-	//vr::VRCompositor()->Submit(eEye, pTexture, pBounds, nSubmitFlags);
-	return g_oldSubmit(pThis, eEye, pTexture, pBounds, nSubmitFlags);
-	
-	/*if(g_realtime && pShaderCompiler && g_pVS && (g_inPits || g_redlights)){
-		fprintf(out_file, "drawing\n");
-		fflush(out_file);
+	if(g_realtime && pShaderCompiler && g_pVS){
 		ID3D11PixelShader* oldPS;
 		ID3D11VertexShader* oldVS;
 		ID3D11ClassInstance* PSclassInstances[256]; // 256 is max according to PSSetShader documentation
@@ -138,7 +123,7 @@ vr::EVRCompositorError __fastcall hookedSubmit(void* pThis, vr::EVREye eEye, con
 		ID3D11Buffer* oldVSConstantBuffer1;
 		ID3D11RasterizerState* rs;
 		ID3D11SamplerState* ss;
-		ID3D11ShaderResourceView* srv;
+		ID3D11ShaderResourceView* srv[2];
 		ID3D11DepthStencilState* dss;
 		UINT stencilRef;
 		ID3D11RenderTargetView* rtv;
@@ -151,7 +136,8 @@ vr::EVRCompositorError __fastcall hookedSubmit(void* pThis, vr::EVREye eEye, con
 		g_context->OMGetRenderTargets(1, &rtv, &dsv);
 		g_context->RSGetState(&rs);
 		g_context->PSGetSamplers(0, 1, &ss);
-		g_context->PSGetShaderResources(0, 1, &srv);
+		g_context->PSGetShaderResources(0, 1, &srv[0]);
+		g_context->PSGetShaderResources(1, 1, &srv[1]);
 		g_context->OMGetDepthStencilState(&dss, &stencilRef);
 		g_context->PSGetShader(&oldPS, PSclassInstances, &psCICount);
 		g_context->VSGetShader(&oldVS, VSclassInstances, &vsCICount);
@@ -163,12 +149,18 @@ vr::EVRCompositorError __fastcall hookedSubmit(void* pThis, vr::EVREye eEye, con
 		g_context->IAGetVertexBuffers(0, 1, &oldVertexBuffers, &oldStrides, &oldOffsets);
 		g_context->IAGetPrimitiveTopology(&oldTopo);
 
+
+		// Is there a better way of doing this? I just want to update the texture...
+		SAFE_RELEASE(g_ColorShaderResourceView);
+		g_d3dDevice->CreateShaderResourceView((ID3D11Texture2D*)(pTexture->handle), NULL, &g_ColorShaderResourceView);
+		
 		draw();//Actually do our stuff...
 
 		g_context->OMSetRenderTargets(1, &rtv, dsv);
 		g_context->RSSetState(rs);
 		g_context->PSSetSamplers(0, 1, &ss);
-		g_context->PSGetShaderResources(0, 1, &srv);
+		g_context->PSSetShaderResources(0, 1, &srv[0]);
+		g_context->PSSetShaderResources(1, 1, &srv[1]);
 		g_context->OMSetDepthStencilState(dss, stencilRef);
 		g_context->PSSetShader(oldPS, PSclassInstances, psCICount);
 		g_context->VSSetShader(oldVS, VSclassInstances, vsCICount);
@@ -181,13 +173,11 @@ vr::EVRCompositorError __fastcall hookedSubmit(void* pThis, vr::EVREye eEye, con
 		g_context->IASetPrimitiveTopology(oldTopo);
 		
 		vr::Texture_t vrTexture = { ( void * ) g_renderTargetTextureMap, vr::TextureType_DirectX, vr::ColorSpace_Gamma };
-		return g_oldSubmit(eEye, &vrTexture, pBounds, nSubmitFlags);
+		return g_oldSubmit(pThis, eEye, &vrTexture, pBounds, nSubmitFlags);
 	}
 
-	
-	//vr::VRCompositor()->Submit(eEye, pTexture, pBounds, nSubmitFlags);
-	//g_swapchain->Present(0, 0);
-	return g_oldSubmit(eEye, pTexture, pBounds, nSubmitFlags);*/
+	return g_oldSubmit(pThis, eEye, pTexture, pBounds, nSubmitFlags);
+
 }
 
 VRDOFPlugin::~VRDOFPlugin(){
@@ -300,105 +290,60 @@ void VRDOFPlugin::EnterRealtime()
 		}else{
 			WriteLog("Unable to hook Submit");
 		}
-		//}
-    }
-
-	if(g_oldSubmit){
-		ID3D11Texture2D *pSearchTexture;
-		CreateSearchTexture(g_d3dDevice, &pSearchTexture);
-		DWORD pVtable = *(DWORD*)pSearchTexture;
-		g_depthTexture = (ID3D11Texture2D*) findInstance(pSearchTexture, pVtable, testTexture);
-		if(g_depthTexture){
-			WriteLog("Found depth buffer texture");
-			g_d3dDevice->CreateShaderResourceView(g_depthTexture, NULL, &g_DepthShaderResourceView);
-		}else
-			WriteLog("No depth buffer texture found!");
-		SAFE_RELEASE(pSearchTexture);
-	}
-	if(g_DepthShaderResourceView){
-		//Create a new render target
-		D3D11_TEXTURE2D_DESC depthDesc;
-		g_depthTexture->GetDesc(&depthDesc);
+		if(g_oldSubmit){
+			ID3D11Texture2D *pSearchTexture;
+			CreateSearchTexture(g_d3dDevice, &pSearchTexture);
+			DWORD pVtable = *(DWORD*)pSearchTexture;
+			g_depthTexture = (ID3D11Texture2D*) findInstance(pSearchTexture, pVtable, testTexture);
+			if(g_depthTexture){
+				WriteLog("Found depth buffer texture");
+				g_d3dDevice->CreateShaderResourceView(g_depthTexture, NULL, &g_DepthShaderResourceView);
+			}else
+				WriteLog("No depth buffer texture found!");
+			SAFE_RELEASE(pSearchTexture);
+		}
+		if(g_DepthShaderResourceView){
+			//Create a new render target
+			D3D11_TEXTURE2D_DESC depthDesc;
+			g_depthTexture->GetDesc(&depthDesc);
 		
 		
 		
-		D3D11_TEXTURE2D_DESC textureDesc;
-		D3D11_RENDER_TARGET_VIEW_DESC renderTargetViewDesc;
-		D3D11_SHADER_RESOURCE_VIEW_DESC shaderResourceViewDesc;
+			D3D11_TEXTURE2D_DESC textureDesc;
+			D3D11_RENDER_TARGET_VIEW_DESC renderTargetViewDesc;
 
-		ZeroMemory(&textureDesc, sizeof(textureDesc));
-		textureDesc.Width = depthDesc.Width;
-		textureDesc.Height = depthDesc.Height;
-		textureDesc.MipLevels = 1;
-		textureDesc.ArraySize = 1;
-		textureDesc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
-		textureDesc.SampleDesc.Count = 1;
-	    textureDesc.Usage = D3D11_USAGE_DEFAULT;
-		textureDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-	    textureDesc.CPUAccessFlags = 0;
-		textureDesc.MiscFlags = 0;
+			ZeroMemory(&textureDesc, sizeof(textureDesc));
+			textureDesc.Width = depthDesc.Width;
+			textureDesc.Height = depthDesc.Height;
+			textureDesc.MipLevels = 1;
+			textureDesc.ArraySize = 1;
+			textureDesc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+			textureDesc.SampleDesc.Count = 1;
+			textureDesc.Usage = D3D11_USAGE_DEFAULT;
+			textureDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+			textureDesc.CPUAccessFlags = 0;
+			textureDesc.MiscFlags = 0;
 
-		g_d3dDevice->CreateTexture2D(&textureDesc, NULL, &g_renderTargetTextureMap);
+			g_d3dDevice->CreateTexture2D(&textureDesc, NULL, &g_renderTargetTextureMap);
 		
-		renderTargetViewDesc.Format = textureDesc.Format;
-		renderTargetViewDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
-		renderTargetViewDesc.Texture2D.MipSlice = 0;
+			renderTargetViewDesc.Format = textureDesc.Format;
+			renderTargetViewDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+			renderTargetViewDesc.Texture2D.MipSlice = 0;
 
-		// Create the render target view.
-		g_d3dDevice->CreateRenderTargetView(g_renderTargetTextureMap, &renderTargetViewDesc, &g_renderTargetViewMap);
-
-		shaderResourceViewDesc.Format = textureDesc.Format;
-		shaderResourceViewDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-		shaderResourceViewDesc.Texture2D.MostDetailedMip = 0;
-		shaderResourceViewDesc.Texture2D.MipLevels = 1;
-
-		// Create the shader resource view.
-		g_d3dDevice->CreateShaderResourceView(g_renderTargetTextureMap, &shaderResourceViewDesc, &g_shaderResourceViewMap);
+			// Create the render target view.
+			g_d3dDevice->CreateRenderTargetView(g_renderTargetTextureMap, &renderTargetViewDesc, &g_renderTargetViewMap);
+		}
 	}
     if(!g_d3dDevice || !g_swapchain || !g_context)
         WriteLog("Failed to find dx11 resources");
-	
-	vr::Texture_t vrTexture = { ( void * ) g_depthTexture, vr::TextureType_DirectX, vr::ColorSpace_Gamma };
-	g_compositor->Submit(vr::Eye_Left, &vrTexture);
 }
 
-void VRDOFPlugin::ExitRealtime()
-{
+void VRDOFPlugin::ExitRealtime(){
     g_realtime = false;
-    //g_messageDisplayed = false;
     WriteLog("---EXITREALTIME---");
-
-	//SAFE_RELEASE(g_renderTargetTextureMap);
-	//SAFE_RELEASE(g_renderTargetViewMap);
-	//SAFE_RELEASE(g_shaderResourceViewMap);
 }
 
-void VRDOFPlugin::UpdateScoring( const ScoringInfoV01 &info ){
-	long numVehicles = info.mNumVehicles;
-    long i;
-	for(i = 0; i < numVehicles; i++){
-        if(info.mVehicle[i].mIsPlayer){
-			g_inPits = info.mVehicle[i].mInPits;
-            break;
-		}
-	}
-	if(info.mGamePhase == 4)
-		g_redlights = true;
-	else
-		g_redlights = false;
-
-	if(g_inPits){
-		g_redCount = 4;
-		g_redActive = 4;
-	}else{
-		g_redActive = info.mStartLight;
-		g_redCount = info.mNumRedLights;
-	}
-
-}
-
-bool VRDOFPlugin::WantsToDisplayMessage( MessageInfoV01 &msgInfo )
-{
+bool VRDOFPlugin::WantsToDisplayMessage( MessageInfoV01 &msgInfo ){
 	if(g_realtime && !g_messageDisplayed){
         
         if(g_d3dDevice && g_swapchain && g_oldSubmit && g_pPS)
@@ -597,7 +542,7 @@ void VRDOFPlugin::InitPipeline(){
 
 
     WriteLog("Creating buffers");
-    D3D11_BUFFER_DESC vbd, viewport_cbd, color_cbd;
+    D3D11_BUFFER_DESC vbd;//, viewport_cbd, color_cbd;
     ZeroMemory(&vbd, sizeof(vbd));
     vbd.Usage = D3D11_USAGE_DYNAMIC;                // write access access by CPU and GPU
     vbd.ByteWidth = sizeof(float) * 3 * 4;          // size is the VERTEX struct * 3
@@ -605,7 +550,7 @@ void VRDOFPlugin::InitPipeline(){
     vbd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;    // allow CPU to write in buffer
     g_d3dDevice->CreateBuffer(&vbd, NULL, &g_pVBuffer);       // create the buffer
 
-	ZeroMemory(&viewport_cbd, sizeof(viewport_cbd));
+	/*ZeroMemory(&viewport_cbd, sizeof(viewport_cbd));
 	viewport_cbd.Usage = D3D11_USAGE_DYNAMIC;                
 	viewport_cbd.ByteWidth = sizeof(cbViewport);
     viewport_cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;      
@@ -617,7 +562,7 @@ void VRDOFPlugin::InitPipeline(){
     color_cbd.ByteWidth = sizeof(cbLights);
     color_cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;      
     color_cbd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-    g_d3dDevice->CreateBuffer(&color_cbd, NULL, &g_pLightColorCBuffer);
+    g_d3dDevice->CreateBuffer(&color_cbd, NULL, &g_pLightColorCBuffer);*/
 
 
     float quad_vertices[] = {
@@ -644,7 +589,7 @@ void VRDOFPlugin::InitPipeline(){
     WriteLog("Setting layout of shader");
     g_d3dDevice->CreateInputLayout(ied, 1, VS->GetBufferPointer(), VS->GetBufferSize(), &g_pLayout);
 
-    WriteLog("Mapping Constant Buffer info");
+    /*WriteLog("Mapping Constant Buffer info");
     DXGI_SWAP_CHAIN_DESC pDesc;
 	g_swapchain->GetDesc(&pDesc);
     g_context->Map(g_pViewportCBuffer, NULL, D3D11_MAP_WRITE_DISCARD,  NULL, &ms);
@@ -656,7 +601,7 @@ void VRDOFPlugin::InitPipeline(){
 	cbLights* lightsDataPtr = (cbLights*)ms.pData;
 	lightsDataPtr->color = 0.0f;
 	lightsDataPtr->count = 4.0f;	
-    g_context->Unmap(g_pLightColorCBuffer, NULL);
+    g_context->Unmap(g_pLightColorCBuffer, NULL);*/
 
 	WriteLog("Creating rasterizer state");
 	D3D11_RASTERIZER_DESC rsDesc;
