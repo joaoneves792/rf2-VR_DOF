@@ -257,12 +257,45 @@ const char * const dof_shader =
 "           kernel[1][0]*t[3] + kernel[1][1]*t[4] + kernel[1][2]*t[5] +\n"
 "           kernel[2][0]*t[6] + kernel[2][1]*t[7] + kernel[2][2]*t[8];\n"
 "}\n"
+"#define FAR 4.0f\n"//Yes I am aware this are not the real values, but it doesnt matter
+"#define NEAR 0.001f\n"
 "float4 PShader(VOut input) : SV_TARGET{\n"
 "	 float depth = Depth.Sample( Sampler, input.uv ).r;\n"
-"    depth = depth + 1.0f;\n"
+"	 //float P32 = -((2*FAR*NEAR)/(FAR-NEAR));\n"
+"    //float P22 = -((FAR+NEAR)/(FAR-NEAR));\n"
+"    //float z = -(P32/(depth+P22));\n" //Pseudo-Linearized Depth (not really all that great, far away is too blured, near is very pixelized)
+"    depth = depth + 0.9f;\n"
 "	 //float2 radius = float2(1.0/1920.0f, 1.0f/1080.0f);\n"
-"	 float radius = depth*0.0005f;\n"
+"	 float radius = depth*0.0005f;\n" // z = [0-4]
 "    float3 color = convolute(input.uv, radius);\n"
 "    return float4(color.r, color.g, color.b, 1.0);\n"
 "}";
+
+const char * const mfaa_shader = //This isnt really mfaa, but close enough (just testing an idea)
+"struct VOut{\n"
+"    float4 pos : SV_POSITION;\n"
+"    float2 uv : TEXCOORD0;\n"
+"};\n"
+"Texture2D current : register(t0);\n"
+"Texture2D last : register(t1);\n"
+"sampler Sampler : register(s0);\n"
+"float rgb2luma(float3 rgb)\n"
+"{\n"
+"    return sqrt(dot(rgb, float3(0.2989999949932098388671875f, 0.58700001239776611328125f, 0.114000000059604644775390625f)));\n"
+"}\n"
+"float4 main(VOut input) : SV_TARGET{\n"
+"	 float3 currentColor = current.Sample( Sampler, input.uv ).rgb;\n"
+"    float3 lastColor = last.Sample( Sampler, input.uv ).rgb;\n"
+"    //Compute lumas\n"
+"	 float lumaCurrent = rgb2luma(currentColor);\n"
+"	 float lumaLast = rgb2luma(lastColor);\n"
+"    float lumaMax = max(lumaLast, lumaCurrent);\n"
+"    float lumaMin = min(lumaLast, lumaCurrent);\n"
+"    float lumaRange = lumaMax - lumaMin;\n"
+"    if (lumaRange < max(0.031199999153614044189453125f, lumaMax * 0.125f)){\n"
+"		return float4((currentColor*0.4f)+(lastColor*0.6f), 1.0f);\n" //EWMA
+"    }\n"
+"    return float4(currentColor, 1.0);\n"
+"}";
+
 #endif //__SEMAPHORE_SHADER__

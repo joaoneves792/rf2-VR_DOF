@@ -61,6 +61,7 @@ pD3DCompile pShaderCompiler = NULL;
 ID3D11VertexShader *g_pVS = NULL;
 ID3D11PixelShader *g_pPS;   
 ID3D11PixelShader *g_pFXAAPS;
+ID3D11PixelShader *g_pMFAAPS;
 ID3D11InputLayout *g_pLayout;
 ID3D11Buffer *g_pVBuffer;
 ID3D11RasterizerState* g_rs;
@@ -70,9 +71,13 @@ ID3D11ShaderResourceView* g_ColorShaderResourceView;
 ID3D11DepthStencilState* g_DepthStencilState; //to disable depth writes
 ID3D11Texture2D* g_dofTexture;
 ID3D11RenderTargetView* g_dofTargetView;
-ID3D11ShaderResourceView* g_dofResourceView;
+ID3D11ShaderResourceView* g_dofResourceView = NULL;
+ID3D11Texture2D* g_mfaaTexture;
+ID3D11RenderTargetView* g_mfaaTargetView;
+ID3D11ShaderResourceView* g_mfaaResourceView = NULL;
 ID3D11Texture2D* g_fxaaTexture;
-ID3D11RenderTargetView* g_fxaaView;
+ID3D11RenderTargetView* g_fxaaTargetView;
+ID3D11ShaderResourceView* g_fxaaResourceView = NULL;
 
 
 void draw(){
@@ -95,19 +100,45 @@ void draw(){
     g_context->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		
     g_context->Draw(6, 0);
-	
-	//Do FXAA pass
+
+	//Do MFAA pass
 	SAFE_RELEASE(g_dofResourceView);
 	g_d3dDevice->CreateShaderResourceView(g_dofTexture, NULL, &g_dofResourceView);
 
-	g_context->OMSetRenderTargets( 1, &g_fxaaView, NULL);
-    g_context->ClearRenderTargetView(g_fxaaView, bgColor);
+	if(!g_fxaaResourceView){
+		g_d3dDevice->CreateShaderResourceView(g_dofTexture, NULL, &g_fxaaResourceView);
+	}else{
+		SAFE_RELEASE(g_fxaaResourceView);
+		g_d3dDevice->CreateShaderResourceView(g_fxaaTexture, NULL, &g_fxaaResourceView);
+	}
+
+	g_context->OMSetRenderTargets( 1, &g_mfaaTargetView, NULL);
+	g_context->ClearRenderTargetView(g_mfaaTargetView, bgColor);
+	g_context->RSSetState(g_rs);
+    g_context->VSSetShader(g_pVS, 0, 0);
+    g_context->PSSetShader(g_pMFAAPS, 0, 0);
+    g_context->IASetInputLayout(g_pLayout);
+	g_context->PSSetSamplers(0, 1, &g_d3dSamplerState);
+	g_context->PSSetShaderResources(0, 1, &g_dofResourceView);
+	g_context->PSSetShaderResources(1, 1, &g_fxaaResourceView);
+	g_context->OMSetDepthStencilState(g_DepthStencilState, 0);
+    g_context->IASetVertexBuffers(0, 1, &g_pVBuffer, &stride, &offset);
+    g_context->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+    g_context->Draw(6, 0);
+
+	//Do FXAA pass
+	SAFE_RELEASE(g_mfaaResourceView);
+	g_d3dDevice->CreateShaderResourceView(g_mfaaTexture, NULL, &g_mfaaResourceView);
+
+	g_context->OMSetRenderTargets( 1, &g_fxaaTargetView, NULL);
+    g_context->ClearRenderTargetView(g_fxaaTargetView, bgColor);
 	g_context->RSSetState(g_rs);
     g_context->VSSetShader(g_pVS, 0, 0);
     g_context->PSSetShader(g_pFXAAPS, 0, 0);
     g_context->IASetInputLayout(g_pLayout);
 	g_context->PSSetSamplers(0, 1, &g_d3dSamplerState);
-	g_context->PSSetShaderResources(0, 1, &g_dofResourceView);
+	g_context->PSSetShaderResources(0, 1, &g_mfaaResourceView);
 	g_context->OMSetDepthStencilState(g_DepthStencilState, 0);
     g_context->IASetVertexBuffers(0, 1, &g_pVBuffer, &stride, &offset);
     g_context->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -350,6 +381,7 @@ void VRDOFPlugin::EnterRealtime()
 			textureDesc.MiscFlags = 0;
 
 			g_d3dDevice->CreateTexture2D(&textureDesc, NULL, &g_dofTexture);
+			g_d3dDevice->CreateTexture2D(&textureDesc, NULL, &g_mfaaTexture);
 			g_d3dDevice->CreateTexture2D(&textureDesc, NULL, &g_fxaaTexture);
 
 			renderTargetViewDesc.Format = textureDesc.Format;
@@ -358,7 +390,8 @@ void VRDOFPlugin::EnterRealtime()
 
 			// Create the render target view.
 			g_d3dDevice->CreateRenderTargetView(g_dofTexture, &renderTargetViewDesc, &g_dofTargetView);
-			g_d3dDevice->CreateRenderTargetView(g_fxaaTexture, &renderTargetViewDesc, &g_fxaaView);
+			g_d3dDevice->CreateRenderTargetView(g_mfaaTexture, &renderTargetViewDesc, &g_mfaaTargetView);
+			g_d3dDevice->CreateRenderTargetView(g_fxaaTexture, &renderTargetViewDesc, &g_fxaaTargetView);
 
 			/*D3D11_MAPPED_SUBRESOURCE ms;
 			g_context->Map(g_pViewportCBuffer, NULL, D3D11_MAP_WRITE_DISCARD,  NULL, &ms);
@@ -551,12 +584,12 @@ IDXGISwapChain* VRDOFPlugin::getDX11SwapChain(){
 
 
 void VRDOFPlugin::InitPipeline(){
-    ID3D10Blob *VS, *PS, *fxaaPS;
+    ID3D10Blob *VS, *PS, *fxaaPS, *mfaaPS;
     ID3D10Blob *pErrors;
     std::string quadshader = std::string(quad_shader);
     std::string DOFshader =  std::string(dof_shader);
 	std::string FXAAshader = std::string(fxaa_shader);
-
+	std::string MFAAshader = std::string(mfaa_shader);
 
     if(!pShaderCompiler)
         return;
@@ -574,6 +607,10 @@ void VRDOFPlugin::InitPipeline(){
     if(pErrors)
         WriteLog(static_cast<char*>(pErrors->GetBufferPointer()));
 
+	(pShaderCompiler)((LPCVOID) MFAAshader.c_str(), MFAAshader.length(), NULL, NULL, NULL, "main", "ps_4_0", 0, 0, &mfaaPS, &pErrors);
+    if(pErrors)
+        WriteLog(static_cast<char*>(pErrors->GetBufferPointer()));
+
 
     if(pErrors){
 		return;
@@ -582,6 +619,7 @@ void VRDOFPlugin::InitPipeline(){
     g_d3dDevice->CreateVertexShader(VS->GetBufferPointer(), VS->GetBufferSize(), NULL, &g_pVS);
     g_d3dDevice->CreatePixelShader(PS->GetBufferPointer(), PS->GetBufferSize(), NULL, &g_pPS);
 	g_d3dDevice->CreatePixelShader(fxaaPS->GetBufferPointer(), fxaaPS->GetBufferSize(), NULL, &g_pFXAAPS);
+	g_d3dDevice->CreatePixelShader(mfaaPS->GetBufferPointer(), mfaaPS->GetBufferSize(), NULL, &g_pMFAAPS);
 
 
     WriteLog("Creating buffers");
@@ -652,7 +690,7 @@ void VRDOFPlugin::InitPipeline(){
 	D3D11_SAMPLER_DESC samplerDesc;
 	ZeroMemory( &samplerDesc, sizeof(D3D11_SAMPLER_DESC) );
  
-	samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+	samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR; //TODO ohters?
 	samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
 	samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
 	samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
