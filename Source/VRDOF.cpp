@@ -60,6 +60,7 @@ SubmitHook g_oldSubmit = NULL;
 pD3DCompile pShaderCompiler = NULL;
 ID3D11VertexShader *g_pVS = NULL;
 ID3D11PixelShader *g_pPS;   
+ID3D11PixelShader *g_pFXAAPS;
 ID3D11InputLayout *g_pLayout;
 ID3D11Buffer *g_pVBuffer;
 ID3D11RasterizerState* g_rs;
@@ -524,28 +525,37 @@ IDXGISwapChain* VRDOFPlugin::getDX11SwapChain(){
 
 
 void VRDOFPlugin::InitPipeline(){
-    ID3D10Blob *VS, *PS;
+    ID3D10Blob *VS, *PS, *fxaaPS;
     ID3D10Blob *pErrors;
-    std::string shader = std::string(semaphore_shader);
-    
+    std::string quadshader = std::string(quad_shader);
+    std::string DOFshader =  std::string(dof_shader);
+	std::string FXAAshader = std::string(fxaa_shader);
+
+
     if(!pShaderCompiler)
         return;
 
-    WriteLog("Compiling shader");
-    (pShaderCompiler)((LPCVOID) shader.c_str(), shader.length(), NULL, NULL, NULL, "VShader", "vs_4_0", 0, 0, &VS, &pErrors);
+    WriteLog("Compiling shaders");
+    (pShaderCompiler)((LPCVOID) quadshader.c_str(), quadshader.length(), NULL, NULL, NULL, "VShader", "vs_4_0", 0, 0, &VS, &pErrors);
     if(pErrors)
         WriteLog(static_cast<char*>(pErrors->GetBufferPointer()));
 
-    (pShaderCompiler)((LPCVOID) shader.c_str(), shader.length(), NULL, NULL, NULL, "PShader", "ps_4_0", 0, 0, &PS, &pErrors);
+    (pShaderCompiler)((LPCVOID) DOFshader.c_str(), DOFshader.length(), NULL, NULL, NULL, "PShader", "ps_4_0", 0, 0, &PS, &pErrors);
     if(pErrors)
         WriteLog(static_cast<char*>(pErrors->GetBufferPointer()));
 
+	(pShaderCompiler)((LPCVOID) FXAAshader.c_str(), FXAAshader.length(), NULL, NULL, NULL, "main", "ps_4_0", 0, 0, &fxaaPS, &pErrors);
     if(pErrors)
-        return;
+        WriteLog(static_cast<char*>(pErrors->GetBufferPointer()));
+
+
+    if(pErrors){
+		return;
+	}
     
     g_d3dDevice->CreateVertexShader(VS->GetBufferPointer(), VS->GetBufferSize(), NULL, &g_pVS);
     g_d3dDevice->CreatePixelShader(PS->GetBufferPointer(), PS->GetBufferSize(), NULL, &g_pPS);
-
+	g_d3dDevice->CreatePixelShader(fxaaPS->GetBufferPointer(), fxaaPS->GetBufferSize(), NULL, &g_pFXAAPS);
 
 
     WriteLog("Creating buffers");

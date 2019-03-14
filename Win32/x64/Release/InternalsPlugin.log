@@ -1,4 +1,4 @@
-﻿Build started 3/14/2019 6:04:37 AM.
+﻿Build started 3/14/2019 9:16:21 AM.
      1>Project "C:\Users\joao\Documents\Visual Studio 2012\Projects\rf2-VRDOF\Win32\InternalsPlugin.vcxproj" on node 2 (Rebuild target(s)).
      1>ClCompile:
          C:\Program Files (x86)\Microsoft Visual Studio 11.0\VC\bin\x86_amd64\CL.exe /c /I. /I..\include /Zi /nologo /W3 /WX- /O2 /Ob1 /D WIN32 /D NDEBUG /D _WINDOWS /D _USRDLL /D INTERNALSPLUGIN_EXPORTS /D _CRT_SECURE_NO_DEPRECATE /D _SECURE_SCL=0 /D _VC80_UPGRADE=0x0600 /D _WINDLL /D _MBCS /GF /Gm- /EHsc /MD /Zp16 /GS /Gy /fp:precise /Zc:wchar_t /Zc:forScope /Fo".\Release/" /Fd".\Release/vc110.pdb" /Gr /TP /errorReport:prompt ..\source\VRDOF.cpp ..\source\hooking.cpp
@@ -14,4 +14,4 @@
 
 Build succeeded.
 
-Time Elapsed 00:00:01.78
+Time Elapsed 00:00:02.73
