@@ -49,12 +49,6 @@ struct cbViewport{
     float height;
 };
 
-__declspec(align(16))
-struct cbLights{
-    float color;
-	float count;
-};
-
 class VRDOFPlugin : public InternalsPluginV06
 {
 

@@ -332,6 +332,13 @@ void VRDOFPlugin::EnterRealtime()
 
 			// Create the render target view.
 			g_d3dDevice->CreateRenderTargetView(g_renderTargetTextureMap, &renderTargetViewDesc, &g_renderTargetViewMap);
+
+			/*D3D11_MAPPED_SUBRESOURCE ms;
+			g_context->Map(g_pViewportCBuffer, NULL, D3D11_MAP_WRITE_DISCARD,  NULL, &ms);
+			cbViewport* viewportDataPtr = (cbViewport*)ms.pData;
+			viewportDataPtr->width = (float)(textureDesc.Width);
+			viewportDataPtr->height = (float)(textureDesc.Height);
+			g_context->Unmap(g_pViewportCBuffer, NULL);*/
 		}
 	}
     if(!g_d3dDevice || !g_swapchain || !g_context)
@@ -542,7 +549,7 @@ void VRDOFPlugin::InitPipeline(){
 
 
     WriteLog("Creating buffers");
-    D3D11_BUFFER_DESC vbd;//, viewport_cbd, color_cbd;
+    D3D11_BUFFER_DESC vbd;//, viewport_cbd;//, color_cbd;
     ZeroMemory(&vbd, sizeof(vbd));
     vbd.Usage = D3D11_USAGE_DYNAMIC;                // write access access by CPU and GPU
     vbd.ByteWidth = sizeof(float) * 3 * 4;          // size is the VERTEX struct * 3
@@ -555,9 +562,9 @@ void VRDOFPlugin::InitPipeline(){
 	viewport_cbd.ByteWidth = sizeof(cbViewport);
     viewport_cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;      
     viewport_cbd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-    g_d3dDevice->CreateBuffer(&viewport_cbd, NULL, &g_pViewportCBuffer);
+    g_d3dDevice->CreateBuffer(&viewport_cbd, NULL, &g_pViewportCBuffer);*/
 
-	ZeroMemory(&color_cbd, sizeof(color_cbd));
+	/*ZeroMemory(&color_cbd, sizeof(color_cbd));
 	color_cbd.Usage = D3D11_USAGE_DYNAMIC;                
     color_cbd.ByteWidth = sizeof(cbLights);
     color_cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;      
@@ -589,15 +596,8 @@ void VRDOFPlugin::InitPipeline(){
     WriteLog("Setting layout of shader");
     g_d3dDevice->CreateInputLayout(ied, 1, VS->GetBufferPointer(), VS->GetBufferSize(), &g_pLayout);
 
-    /*WriteLog("Mapping Constant Buffer info");
-    DXGI_SWAP_CHAIN_DESC pDesc;
-	g_swapchain->GetDesc(&pDesc);
-    g_context->Map(g_pViewportCBuffer, NULL, D3D11_MAP_WRITE_DISCARD,  NULL, &ms);
-	cbViewport* viewportDataPtr = (cbViewport*)ms.pData;
-	viewportDataPtr->width = (float)(pDesc.BufferDesc.Width);
-	viewportDataPtr->height = (float)(pDesc.BufferDesc.Height);
-	g_context->Unmap(g_pViewportCBuffer, NULL);
-	g_context->Map(g_pLightColorCBuffer, NULL, D3D11_MAP_WRITE_DISCARD,  NULL, &ms);
+
+	/*g_context->Map(g_pLightColorCBuffer, NULL, D3D11_MAP_WRITE_DISCARD,  NULL, &ms);
 	cbLights* lightsDataPtr = (cbLights*)ms.pData;
 	lightsDataPtr->color = 0.0f;
 	lightsDataPtr->count = 4.0f;	
