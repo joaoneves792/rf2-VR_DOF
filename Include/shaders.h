@@ -132,7 +132,7 @@ const char * const fxaa_shader =
 "    }\n"
 "    if (!reachedBoth)\n"
 "    {\n"
-"        [unroll(10) ]for (int i = 2; i < 12; i++)\n"
+"        [unroll(20) ]for (int i = 2; i < 22; i++)\n"
 "        {\n"
 "            if (!reached1)\n"
 "            {\n"
@@ -292,10 +292,10 @@ const char * const mfaa_shader = //This isnt really mfaa, but close enough (just
 "    float lumaMax = max(lumaLast, lumaCurrent);\n"
 "    float lumaMin = min(lumaLast, lumaCurrent);\n"
 "    float lumaRange = lumaMax - lumaMin;\n"
-"    if (lumaRange < max(0.031199999153614044189453125f, lumaMax * 0.125f)){\n"
-"		return float4((currentColor*0.4f)+(lastColor*0.6f), 1.0f);\n" //EWMA
+"    if (lumaRange < max(0.031199999153614044189453125f, lumaMax * 0.125f)){\n" //If luma difference is small
+"		return float4(currentColor, 1.0);\n"
 "    }\n"
-"    return float4(currentColor, 1.0);\n"
+"	 return float4((currentColor*0.65f)+(lastColor*0.35f), 1.0f);\n" //EWMA
 "}";
 
 #endif //__SEMAPHORE_SHADER__

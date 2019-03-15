@@ -75,16 +75,16 @@ ID3D11ShaderResourceView* g_dofResourceView = NULL;
 ID3D11Texture2D* g_mfaaTexture;
 ID3D11RenderTargetView* g_mfaaTargetView;
 ID3D11ShaderResourceView* g_mfaaResourceView = NULL;
-ID3D11Texture2D* g_fxaaTexture;
-ID3D11RenderTargetView* g_fxaaTargetView;
-ID3D11ShaderResourceView* g_fxaaResourceView = NULL;
+ID3D11Texture2D* g_fxaaTexture[2]; //One for each eye
+ID3D11RenderTargetView* g_fxaaTargetView[2];
+ID3D11ShaderResourceView* g_fxaaResourceView[2] = {NULL, NULL};
 
 
-void draw(){
+void draw(short eye){
+	float bgColor[] = {0.0f, 0.0f, 0.0f, 1.0f};
 
 	//Do DOF pass
-	g_context->OMSetRenderTargets( 1, &g_dofTargetView, NULL);
-	float bgColor[] = {0.0f, 0.0f, 0.0f, 1.0f};
+	/*g_context->OMSetRenderTargets( 1, &g_dofTargetView, NULL);
     g_context->ClearRenderTargetView(g_dofTargetView, bgColor);
 	g_context->RSSetState(g_rs);
     g_context->VSSetShader(g_pVS, 0, 0);
@@ -105,45 +105,62 @@ void draw(){
 	SAFE_RELEASE(g_dofResourceView);
 	g_d3dDevice->CreateShaderResourceView(g_dofTexture, NULL, &g_dofResourceView);
 
-	if(!g_fxaaResourceView){
-		g_d3dDevice->CreateShaderResourceView(g_dofTexture, NULL, &g_fxaaResourceView);
+	if(!g_fxaaResourceView[eye]){
+		g_d3dDevice->CreateShaderResourceView(g_dofTexture, NULL, &g_fxaaResourceView[eye]);
 	}else{
-		SAFE_RELEASE(g_fxaaResourceView);
-		g_d3dDevice->CreateShaderResourceView(g_fxaaTexture, NULL, &g_fxaaResourceView);
+		SAFE_RELEASE(g_fxaaResourceView[eye]);
+		g_d3dDevice->CreateShaderResourceView(g_fxaaTexture[eye], NULL, &g_fxaaResourceView[eye]);
 	}
 
 	g_context->OMSetRenderTargets( 1, &g_mfaaTargetView, NULL);
 	g_context->ClearRenderTargetView(g_mfaaTargetView, bgColor);
-	g_context->RSSetState(g_rs);
-    g_context->VSSetShader(g_pVS, 0, 0);
-    g_context->PSSetShader(g_pMFAAPS, 0, 0);
-    g_context->IASetInputLayout(g_pLayout);
-	g_context->PSSetSamplers(0, 1, &g_d3dSamplerState);
+	g_context->PSSetShader(g_pMFAAPS, 0, 0);
+   	g_context->PSSetSamplers(0, 1, &g_d3dSamplerState);
 	g_context->PSSetShaderResources(0, 1, &g_dofResourceView);
-	g_context->PSSetShaderResources(1, 1, &g_fxaaResourceView);
-	g_context->OMSetDepthStencilState(g_DepthStencilState, 0);
-    g_context->IASetVertexBuffers(0, 1, &g_pVBuffer, &stride, &offset);
-    g_context->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
+	g_context->PSSetShaderResources(1, 1, &g_fxaaResourceView[eye]);
     g_context->Draw(6, 0);
 
 	//Do FXAA pass
 	SAFE_RELEASE(g_mfaaResourceView);
 	g_d3dDevice->CreateShaderResourceView(g_mfaaTexture, NULL, &g_mfaaResourceView);
 
-	g_context->OMSetRenderTargets( 1, &g_fxaaTargetView, NULL);
-    g_context->ClearRenderTargetView(g_fxaaTargetView, bgColor);
+	g_context->OMSetRenderTargets( 1, &g_fxaaTargetView[eye], NULL);
+    g_context->ClearRenderTargetView(g_fxaaTargetView[eye], bgColor);
+	g_context->VSSetShader(g_pVS, 0, 0);
+    g_context->PSSetShader(g_pFXAAPS, 0, 0);
+   	g_context->PSSetSamplers(0, 1, &g_d3dSamplerState);
+	g_context->PSSetShaderResources(0, 1, &g_mfaaResourceView);
+	g_context->Draw(6, 0);
+
+	SAFE_RELEASE(g_mfaaResourceView);
+	g_d3dDevice->CreateShaderResourceView(g_mfaaTexture, NULL, &g_mfaaResourceView);*/
+	
 	g_context->RSSetState(g_rs);
     g_context->VSSetShader(g_pVS, 0, 0);
-    g_context->PSSetShader(g_pFXAAPS, 0, 0);
     g_context->IASetInputLayout(g_pLayout);
-	g_context->PSSetSamplers(0, 1, &g_d3dSamplerState);
-	g_context->PSSetShaderResources(0, 1, &g_mfaaResourceView);
 	g_context->OMSetDepthStencilState(g_DepthStencilState, 0);
+    UINT stride = sizeof(float)*3;
+    UINT offset = 0;
     g_context->IASetVertexBuffers(0, 1, &g_pVBuffer, &stride, &offset);
     g_context->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	g_context->OMSetRenderTargets( 1, &g_fxaaTargetView[0], NULL);
+    g_context->ClearRenderTargetView(g_fxaaTargetView[0], bgColor);
+	g_context->VSSetShader(g_pVS, 0, 0);
+    g_context->PSSetShader(g_pFXAAPS, 0, 0);
+   	g_context->PSSetSamplers(0, 1, &g_d3dSamplerState);
+	g_context->PSSetShaderResources(0, 1, &g_ColorShaderResourceView);
+	g_context->Draw(6, 0);
 
-    g_context->Draw(6, 0);
+	SAFE_RELEASE(g_fxaaResourceView[0]);
+	g_d3dDevice->CreateShaderResourceView(g_fxaaTexture[0], NULL, &g_fxaaResourceView[0]);
+	
+	g_context->OMSetRenderTargets( 1, &g_fxaaTargetView[1], NULL);
+    g_context->ClearRenderTargetView(g_fxaaTargetView[1], bgColor);
+	g_context->VSSetShader(g_pVS, 0, 0);
+    g_context->PSSetShader(g_pFXAAPS, 0, 0);
+   	g_context->PSSetSamplers(0, 1, &g_d3dSamplerState);
+	g_context->PSSetShaderResources(0, 1, &g_fxaaResourceView[0]);
+	g_context->Draw(6, 0);
 }
 
 
@@ -208,7 +225,8 @@ vr::EVRCompositorError __fastcall hookedSubmit(void* pThis, vr::EVREye eEye, con
 		SAFE_RELEASE(g_ColorShaderResourceView);
 		g_d3dDevice->CreateShaderResourceView((ID3D11Texture2D*)(pTexture->handle), NULL, &g_ColorShaderResourceView);
 		
-		draw();//Actually do our stuff...
+		short eye = (eEye == vr::Eye_Left)?0:1;
+		draw(eye);//Actually do our stuff...
 
 		g_context->OMSetRenderTargets(1, &rtv, dsv);
 		g_context->RSSetState(rs);
@@ -227,7 +245,8 @@ vr::EVRCompositorError __fastcall hookedSubmit(void* pThis, vr::EVREye eEye, con
 		g_context->IASetPrimitiveTopology(oldTopo);
 		
 		//vr::Texture_t vrTexture = { ( void * ) g_dofTexture, vr::TextureType_DirectX, vr::ColorSpace_Gamma };
-		vr::Texture_t vrTexture = { ( void * ) g_fxaaTexture, vr::TextureType_DirectX, vr::ColorSpace_Gamma };
+		//vr::Texture_t vrTexture = { ( void * ) g_fxaaTexture[eye], vr::TextureType_DirectX, vr::ColorSpace_Gamma };
+		vr::Texture_t vrTexture = { ( void * ) g_fxaaTexture[1], vr::TextureType_DirectX, vr::ColorSpace_Gamma };
 		
 		return g_oldSubmit(pThis, eEye, &vrTexture, pBounds, nSubmitFlags);
 	}
@@ -382,7 +401,8 @@ void VRDOFPlugin::EnterRealtime()
 
 			g_d3dDevice->CreateTexture2D(&textureDesc, NULL, &g_dofTexture);
 			g_d3dDevice->CreateTexture2D(&textureDesc, NULL, &g_mfaaTexture);
-			g_d3dDevice->CreateTexture2D(&textureDesc, NULL, &g_fxaaTexture);
+			g_d3dDevice->CreateTexture2D(&textureDesc, NULL, &g_fxaaTexture[0]);
+			g_d3dDevice->CreateTexture2D(&textureDesc, NULL, &g_fxaaTexture[1]);
 
 			renderTargetViewDesc.Format = textureDesc.Format;
 			renderTargetViewDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
@@ -391,7 +411,8 @@ void VRDOFPlugin::EnterRealtime()
 			// Create the render target view.
 			g_d3dDevice->CreateRenderTargetView(g_dofTexture, &renderTargetViewDesc, &g_dofTargetView);
 			g_d3dDevice->CreateRenderTargetView(g_mfaaTexture, &renderTargetViewDesc, &g_mfaaTargetView);
-			g_d3dDevice->CreateRenderTargetView(g_fxaaTexture, &renderTargetViewDesc, &g_fxaaTargetView);
+			g_d3dDevice->CreateRenderTargetView(g_fxaaTexture[0], &renderTargetViewDesc, &g_fxaaTargetView[0]);
+			g_d3dDevice->CreateRenderTargetView(g_fxaaTexture[1], &renderTargetViewDesc, &g_fxaaTargetView[1]);
 
 			/*D3D11_MAPPED_SUBRESOURCE ms;
 			g_context->Map(g_pViewportCBuffer, NULL, D3D11_MAP_WRITE_DISCARD,  NULL, &ms);
@@ -690,12 +711,12 @@ void VRDOFPlugin::InitPipeline(){
 	D3D11_SAMPLER_DESC samplerDesc;
 	ZeroMemory( &samplerDesc, sizeof(D3D11_SAMPLER_DESC) );
  
-	samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR; //TODO ohters?
+	samplerDesc.Filter = D3D11_FILTER_ANISOTROPIC;
 	samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
 	samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
 	samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
 	samplerDesc.MipLODBias = 0.0f;
-	samplerDesc.MaxAnisotropy = 1;
+	samplerDesc.MaxAnisotropy = 16;
 	samplerDesc.ComparisonFunc = D3D11_COMPARISON_NEVER;
 	samplerDesc.BorderColor[0] = 1.0f;
 	samplerDesc.BorderColor[1] = 1.0f;

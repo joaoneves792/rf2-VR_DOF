@@ -150,7 +150,7 @@ void hexDump (char *desc, void *addr, int len) {
 //based on: https://www.unknowncheats.me/forum/d3d-tutorials-and-source/88369-universal-d3d11-hook.html by evolution536
 void* placeDetour(BYTE* src, BYTE* dest, int index){
 #define _PTR_MAX_VALUE 0x7FFFFFFEFFFF
-#define JMPLEN (6+8)
+
 #define PRESENT_INDEX 8
 //16 because we are 64bit
 #define PRESENT_JUMP_LENGTH 16 
@@ -192,7 +192,7 @@ void* placeDetour(BYTE* src, BYTE* dest, int index){
     if(length < 0){
         fprintf(out_file, "Bad news, someone hooked this function already!\n");
         //So we double hook it!!
-        //just place a jump to the guys who already hooked it before (Assuming near jump hook, which is not good on x64...)
+        //just place a jump to the guys who already hooked it before (Assuming 0xE9 32bit offset jump hook)
         DWORD newOffset = DisasmRecalculateOffset((SIZE_T)src, (SIZE_T)hook[index]->original_code);
         hook[index]->original_code[0] = 0xE9;
         memcpy(&(hook[index])->original_code[1], &newOffset, sizeof(DWORD));
@@ -204,12 +204,16 @@ void* placeDetour(BYTE* src, BYTE* dest, int index){
 		DisasmLog((SIZE_T)hook[index]->original_code, sizeof(hook[index]->original_code));
     }
 
-    // Build a far jump to the destination function.
+    // Code for absolute 64bit address jump to the destination function.
+	#define JMPLEN (6+8)
 	BYTE jump[] = { 0xFF, 0x25, 0x00, 0x00, 0x00, 0x00, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC};
+	//jmp qword ptr [eip]
+	//0xcccccccccccccccc
 	memcpy(hook[index]->jump, jump, JMPLEN);
 	*(SIZE_T*)&(hook[index])->jump[6] = (SIZE_T)dest; //8 bytes
 
-	//Code for near jump
+	//Code for 32bit offset jump
+	//#define JMPLEN (5)
     //*(WORD*)&(hook[index])->jump = 0xE9;    
     //*(WORD*)(hook[index]->jump + 1) = (WORD)((SIZE_T)dest - (SIZE_T)src - JMPLEN);
 
